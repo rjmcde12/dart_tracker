@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { BoardView, type BoardMarker, type BoardOverlayLabel } from "@/components/BoardView";
 import { ThrowSlots } from "@/components/ThrowSlots";
+import { NewGameModal } from "@/components/NewGameModal";
+import { CricketResultsModal } from "@/components/CricketResultsModal";
 import { createGame, createTurn, addThrow, endGame } from "@/lib/db";
 import {
   RADII,
@@ -10,7 +12,20 @@ import {
   sectorIndexForPoint,
   sectorNumberForIndex,
 } from "@/lib/dartboard";
-import type { Game, Point, Turn, ThrowRecord, ThrowSuffix } from "@/lib/types";
+import {
+  CRICKET_SEQUENCE,
+  cricketMarksForThrow,
+  cricketTargetKey,
+  cricketTargetPoint,
+} from "@/lib/cricket";
+import type {
+  CricketVariant,
+  Game,
+  Point,
+  Turn,
+  ThrowRecord,
+  ThrowSuffix,
+} from "@/lib/types";
 
 const FULL_VIEW_BOX = "-250 -250 500 500";
 // Sector wedge points up (bull at bottom): crop from the bull out well past
@@ -91,6 +106,12 @@ export default function Home() {
   const [currentThrows, setCurrentThrows] = useState<ThrowRecord[]>([]);
   const [editingThrowIndex, setEditingThrowIndex] = useState<number | null>(null);
 
+  const [showNewGameModal, setShowNewGameModal] = useState(false);
+  const [cricketVariant, setCricketVariant] = useState<CricketVariant | null>(null);
+  const [cricketSequenceIndex, setCricketSequenceIndex] = useState(0);
+  const [cricketTallies, setCricketTallies] = useState<Record<string, number>>({});
+  const [cricketResults, setCricketResults] = useState<Record<string, number> | null>(null);
+
   const zoomInfo = useMemo(() => computeZoomInfo(zoomTarget), [zoomTarget]);
 
   const activeTargetPoint =
@@ -107,8 +128,22 @@ export default function Home() {
     return list;
   }, [activeTargetPoint, currentThrows]);
 
-  async function handleStartGame() {
-    const newGame = await createGame();
+  function resetSessionState() {
+    setGame(null);
+    setTurn(null);
+    setTurnNumber(0);
+    setCurrentThrows([]);
+    setEditingThrowIndex(null);
+    setPendingTarget(null);
+    setConfirmedTarget(null);
+    setCricketVariant(null);
+    setCricketSequenceIndex(0);
+    setCricketTallies({});
+    setPhase("idle");
+  }
+
+  async function handleStartFreePlay() {
+    const newGame = await createGame("free-play");
     setGame(newGame);
     setTurn(null);
     setTurnNumber(0);
@@ -116,7 +151,29 @@ export default function Home() {
     setEditingThrowIndex(null);
     setPendingTarget(null);
     setConfirmedTarget(null);
+    setShowNewGameModal(false);
     setPhase("setting-target");
+  }
+
+  async function handleStartCricket(variant: CricketVariant) {
+    const newGame = await createGame("cricket-practice", variant);
+    const spec = CRICKET_SEQUENCE[0];
+    const targetPoint = cricketTargetPoint(spec, variant);
+    const newTurn = await createTurn(newGame.id, 1, targetPoint, spec);
+
+    setGame(newGame);
+    setCricketVariant(variant);
+    setCricketSequenceIndex(0);
+    setCricketTallies({});
+    setTurn(newTurn);
+    setTurnNumber(1);
+    setConfirmedTarget(targetPoint);
+    setPendingTarget(null);
+    setCurrentThrows([]);
+    setEditingThrowIndex(null);
+    setZoomTarget(computeZoomTarget(targetPoint));
+    setShowNewGameModal(false);
+    setPhase("throwing");
   }
 
   function handleFullBoardPick(point: Point) {
@@ -179,13 +236,54 @@ export default function Home() {
   }
 
   async function handleEndTurn() {
-    if (!game || !confirmedTarget) return;
+    if (!game) return;
+
+    if (game.mode === "cricket-practice") {
+      await handleEndCricketTurn(game);
+      return;
+    }
+
+    if (!confirmedTarget) return;
     const nextTurnNumber = turnNumber + 1;
     const newTurn = await createTurn(game.id, nextTurnNumber, confirmedTarget);
     setTurn(newTurn);
     setTurnNumber(nextTurnNumber);
     setCurrentThrows([]);
     setEditingThrowIndex(null);
+  }
+
+  async function handleEndCricketTurn(activeGame: Game) {
+    const variant = cricketVariant;
+    if (!variant) return;
+
+    const spec = CRICKET_SEQUENCE[cricketSequenceIndex];
+    const marksThisTurn = currentThrows.reduce(
+      (sum, t) => sum + cricketMarksForThrow(t.score, spec),
+      0
+    );
+    const updatedTallies = { ...cricketTallies, [cricketTargetKey(spec)]: marksThisTurn };
+    setCricketTallies(updatedTallies);
+
+    const nextIndex = cricketSequenceIndex + 1;
+    if (nextIndex >= CRICKET_SEQUENCE.length) {
+      await endGame(activeGame.id);
+      setCricketResults(updatedTallies);
+      resetSessionState();
+      return;
+    }
+
+    const nextSpec = CRICKET_SEQUENCE[nextIndex];
+    const nextTargetPoint = cricketTargetPoint(nextSpec, variant);
+    const nextTurnNumber = turnNumber + 1;
+    const newTurn = await createTurn(activeGame.id, nextTurnNumber, nextTargetPoint, nextSpec);
+
+    setCricketSequenceIndex(nextIndex);
+    setTurn(newTurn);
+    setTurnNumber(nextTurnNumber);
+    setConfirmedTarget(nextTargetPoint);
+    setCurrentThrows([]);
+    setEditingThrowIndex(null);
+    setZoomTarget(computeZoomTarget(nextTargetPoint));
   }
 
   function handleMoveTarget() {
@@ -199,18 +297,17 @@ export default function Home() {
   async function handleEndGame() {
     if (!game) return;
     await endGame(game.id);
-    setGame(null);
-    setTurn(null);
-    setTurnNumber(0);
-    setCurrentThrows([]);
-    setEditingThrowIndex(null);
-    setPendingTarget(null);
-    setConfirmedTarget(null);
-    setPhase("idle");
+    resetSessionState();
+  }
+
+  function openNewGameModal() {
+    setCricketResults(null);
+    setShowNewGameModal(true);
   }
 
   const canConfirmTarget = phase === "setting-target" && pendingTarget !== null;
-  const canMoveTarget = phase === "throwing" && currentThrows.length === 0;
+  const canMoveTarget =
+    phase === "throwing" && currentThrows.length === 0 && game?.mode !== "cricket-practice";
   const canEndTurn = phase === "throwing" && currentThrows.length === 3;
 
   return (
@@ -218,12 +315,12 @@ export default function Home() {
       <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-3">
         <div>
           <h1 className="text-lg font-semibold">Dart Practice Tracker</h1>
-          <p className="text-sm text-zinc-400">{statusLine(phase, turnNumber, currentThrows.length)}</p>
+          <p className="text-sm text-zinc-400">
+            {statusLine(phase, turnNumber, currentThrows.length, game, cricketSequenceIndex)}
+          </p>
         </div>
         <div className="flex gap-2">
-          {phase === "idle" && (
-            <Button onClick={handleStartGame}>Start Game</Button>
-          )}
+          {phase === "idle" && <Button onClick={openNewGameModal}>New Game</Button>}
           {phase !== "idle" && (
             <Button variant="danger" onClick={handleEndGame}>
               End Game
@@ -259,27 +356,47 @@ export default function Home() {
           onSlotClick={handleSlotClick}
           canEndTurn={canEndTurn}
           onEndTurn={handleEndTurn}
+          canConfirmTarget={canConfirmTarget}
+          onConfirmTarget={handleConfirmTarget}
         />
       </main>
 
       <footer className="flex gap-2 border-t border-zinc-800 px-6 py-4">
-        {phase === "setting-target" && (
-          <Button disabled={!canConfirmTarget} onClick={handleConfirmTarget}>
-            Confirm Target
-          </Button>
-        )}
         {canMoveTarget && (
           <Button variant="secondary" onClick={handleMoveTarget}>
             Move Target
           </Button>
         )}
       </footer>
+
+      {showNewGameModal && (
+        <NewGameModal
+          onStartFreePlay={handleStartFreePlay}
+          onStartCricket={handleStartCricket}
+          onClose={() => setShowNewGameModal(false)}
+        />
+      )}
+
+      {cricketResults && (
+        <CricketResultsModal tallies={cricketResults} onNewGame={openNewGameModal} />
+      )}
     </div>
   );
 }
 
-function statusLine(phase: Phase, turnNumber: number, throwsLogged: number) {
-  if (phase === "idle") return "Tap Start Game to begin a practice session.";
+function statusLine(
+  phase: Phase,
+  turnNumber: number,
+  throwsLogged: number,
+  game: Game | null,
+  cricketSequenceIndex: number
+) {
+  if (phase === "idle") return "Tap New Game to begin a practice session.";
+  if (game?.mode === "cricket-practice") {
+    const spec = CRICKET_SEQUENCE[cricketSequenceIndex];
+    const label = spec.kind === "bull" ? "Bull" : String(spec.number);
+    return `Cricket Practice — Target ${label} — ${throwsLogged}/3 darts logged.`;
+  }
   if (phase === "setting-target")
     return "Tap the full board to set your target, refine it, then confirm.";
   return `Turn ${turnNumber} — ${throwsLogged}/3 darts logged.`;

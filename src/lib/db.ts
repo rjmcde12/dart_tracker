@@ -1,5 +1,14 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { Game, Point, Turn, ThrowRecord, ThrowSuffix } from "./types";
+import type {
+  CricketTargetSpec,
+  CricketVariant,
+  Game,
+  GameMode,
+  Point,
+  Turn,
+  ThrowRecord,
+  ThrowSuffix,
+} from "./types";
 import { pointToScore, distance } from "./dartboard";
 
 interface DartDB extends DBSchema {
@@ -32,9 +41,14 @@ function getDb() {
   return dbPromise;
 }
 
-export async function createGame(): Promise<Game> {
+export async function createGame(
+  mode: GameMode,
+  cricketVariant: CricketVariant | null = null
+): Promise<Game> {
   const game: Game = {
     id: crypto.randomUUID(),
+    mode,
+    cricketVariant,
     startedAt: Date.now(),
     endedAt: null,
   };
@@ -54,13 +68,15 @@ export async function endGame(gameId: string): Promise<void> {
 export async function createTurn(
   gameId: string,
   turnNumber: number,
-  target: Point
+  target: Point,
+  cricketTarget: CricketTargetSpec | null = null
 ): Promise<Turn> {
   const turn: Turn = {
     id: `${gameId}-t${turnNumber}`,
     gameId,
     turnNumber,
     target,
+    cricketTarget,
     createdAt: Date.now(),
   };
   const db = await getDb();

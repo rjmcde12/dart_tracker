@@ -37,6 +37,12 @@ export function sectorNumberForIndex(index: number): number {
   return SECTOR_ORDER[i];
 }
 
+export function sectorIndexForNumber(number: number): number {
+  const index = SECTOR_ORDER.indexOf(number);
+  if (index === -1) throw new Error(`${number} is not a valid dartboard number`);
+  return index;
+}
+
 /** Center angle (deg, clockwise from up) of the given sector index. */
 export function sectorCenterAngleDeg(index: number): number {
   return index * SECTOR_ANGLE_DEG;

@@ -8,8 +8,13 @@ used touch-first (tap to select points on a dartboard image — no typing
 during a practice session).
 
 This is an MVP. Scope is intentionally narrow: get the core logging loop
-working and data persisted locally. History views, real scoring games
-(501/cricket/etc.), and a backend database are later iterations.
+working and data persisted locally. History views and a backend database
+are later iterations.
+
+The app supports multiple **Game Modes** (Free Play, Cricket Practice, and
+more to come) — see [GAME_MODES.md](./GAME_MODES.md) for the full catalog
+and rules of each. This file covers the shared app architecture (board UI,
+coordinate system, scoring, persistence) that every mode builds on.
 
 ## Tech Stack
 
@@ -125,32 +130,41 @@ because that would flip bottom-half sector numbers upside-down. Instead:
 
 ## Core Workflow
 
-1. **Start Game** — creates a new Game record (id + start timestamp).
-2. **Set Target** — user taps a point on the full dartboard. The zoomed
-   wedge panel updates to show that sector. The user can refine the exact
-   point by tapping again on the full board (which may also jump the
-   zoom panel to a different sector) or by tapping inside the zoom panel
-   (which only refines the point within the currently displayed wedge).
-   Each tap replaces the pending Target position.
-3. **Confirm Target** — user taps a Confirm button. The Target position
-   is locked in and saved for the upcoming turn(s).
+1. **New Game** — opens a modal to choose a Game Mode (Free Play, Cricket
+   Practice, ...). See [GAME_MODES.md](./GAME_MODES.md) for what each mode
+   asks next (e.g. Cricket Practice then asks for a Target variant) and
+   how it drives Target placement. Choosing a mode creates the Game record
+   (id + mode + start timestamp) and begins the session.
+2. **Set Target** — *(Free Play only — other modes place the Target
+   automatically; see GAME_MODES.md)*. User taps a point on the full
+   dartboard. The zoomed wedge panel updates to show that sector. The user
+   can refine the exact point by tapping again on the full board (which
+   may also jump the zoom panel to a different sector) or by tapping
+   inside the zoom panel (which only refines the point within the
+   currently displayed wedge). Each tap replaces the pending Target
+   position.
+3. **Confirm Target** — *(Free Play only)*. Button in the Throw Slots
+   panel (see below). Locks in the Target position for the upcoming
+   turn(s).
 4. **Log Throws** — user throws 3 real darts, then taps where each landed
    (on either panel, in any order) — 3 Throw Result points collected per
    turn, populating the Throw Slots on the right as they're logged.
 5. **End Turn** — appears once 3 Throw Results are logged for the current
    turn. Before tapping it, any of the 3 logged throws can be adjusted
-   via its Throw Slot (see below). Tapping End Turn saves the turn,
-   clears the 3 Throw Results/slots, and starts a new turn with the
-   **same Target** still active.
-6. **Move Target** — available at any time between turns. Re-enters the
-   Set Target flow (step 2) to choose a new target; otherwise the Target
-   persists across turns by default.
-7. **End Game** — ends the session (end timestamp saved). Exact trigger
-   UI (explicit button vs. navigating away) — see Open Questions.
+   via its Throw Slot (see below). Tapping End Turn saves the turn, clears
+   the 3 Throw Results/slots, and either starts a new turn with the same
+   Target (Free Play) or auto-advances to the mode's next Target (Cricket
+   Practice — see GAME_MODES.md), possibly ending the game.
+6. **Move Target** — *(Free Play only)*. Available any time between
+   turns. Re-enters the Set Target flow (step 2) to choose a new target;
+   otherwise the Target persists across turns by default.
+7. **End Game** — ends the session (end timestamp saved), either manually
+   (End Game button, available any time) or automatically when a mode's
+   sequence completes (e.g. Cricket Practice after the Bull turn).
 
-Note: Target is a free `(x, y)` point, not constrained to a specific
-number's center — the user can aim at any spot on the board (e.g. a
-specific treble, a spot just off the bullseye, etc.). Scoring logic
+Note: in Free Play, Target is a free `(x, y)` point, not constrained to a
+specific number's center — the user can aim at any spot on the board (e.g.
+a specific treble, a spot just off the bullseye, etc.). Scoring logic
 (below) is only applied to interpret *Throw Results*, not to constrain
 where a Target can be set.
 
@@ -175,6 +189,9 @@ to the right of the two board panels, for the current turn only:
 - The **End Turn?** button lives in this panel, below the turn total,
   rather than in the page footer — it only appears once all 3 slots are
   filled, right next to the results it's finalizing.
+- The **Confirm Target** button (Free Play only, see GAME_MODES.md) lives
+  in this same panel, in the same spot End Turn later occupies — it only
+  appears while setting a Target, before any of the panel's slots exist.
 
 ## Scoring & Accuracy
 
@@ -193,14 +210,18 @@ to the right of the two board panels, for the current turn only:
 
 ```
 Game
-  id            (uuid)
-  startedAt     (timestamp)
-  endedAt       (timestamp | null)
+  id             (uuid)
+  mode           "free-play" | "cricket-practice" | ...
+  cricketVariant "single" | "triple" | null   // only for cricket-practice
+  startedAt      (timestamp)
+  endedAt        (timestamp | null)
 
 Turn
   id            (`${gameId}-t${n}`, sequential per game)
   gameId
   target        { x, y }
+  cricketTarget { kind: "number", number } | { kind: "bull" } | null
+                // only set for cricket-practice turns; see GAME_MODES.md
   createdAt
 
 Throw
@@ -225,8 +246,8 @@ Throw
 - Backend / remote database sync (local IndexedDB only for now)
 - History or progress views (charts, trends, past-game list) — data is
   captured but not yet visualized beyond the live session
-- Standard dart games (501, cricket, etc.) — this is open-ended practice
-  logging only
+- Standard dart games beyond what's listed in GAME_MODES.md (e.g. 501) —
+  new modes are added there as they're built
 - User accounts / multi-user support
 - Editing or deleting throws/turns/games once the turn has ended (End
   Turn tapped) or the game has ended — only the 3 in-progress throws of
