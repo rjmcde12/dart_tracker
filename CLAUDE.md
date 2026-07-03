@@ -61,23 +61,34 @@ scoring.
 
 ## UI Layout (per `layout.pdf`)
 
-Two panels side by side, landscape:
+Three panels side by side, landscape:
 
 1. **Left — Full Dartboard**: the complete `dartboard.svg`. Used to (a)
    pick the initial Target, and (b) optionally log Throw Results directly
-   on the full board.
-2. **Right — Zoomed Wedge**: a magnified crop of the sector the user is
+   on the full board — especially useful for a wild throw that lands far
+   from the Target and wouldn't be visible in the zoomed panel.
+2. **Center — Zoomed Wedge**: a magnified crop of the sector the user is
    currently targeting — from the bullseye out to the outer edge of the
    double ring, spanning that sector's full 18° wedge, rotated so the
    wedge points straight up (matches the mockup). Used to refine the
-   Target position and/or log Throw Results with more precision.
+   Target position and/or log Throw Results with more precision, for
+   throws that land close to the Target.
+3. **Right — Throw Slots**: three slots (Dart A / B / C) for the current
+   turn. See "Throw Slots & Editing" below.
 
-Which sector is "currently targeted" (and therefore what the zoom panel
-shows) is determined only by taps on the **full board**. A tap inside the
-zoom panel itself never changes which sector/wedge is being zoomed —
-it only sets a point within the currently displayed wedge (refining the
-Target, or logging a Throw Result). This applies both during Target
-refinement and during Throw logging.
+**Zoom panel behavior differs by phase:**
+
+- **While setting a Target**: only taps on the **full board** change
+  which sector/wedge the zoom panel displays. Taps inside the zoom panel
+  itself never change the zoom window — they only refine the pending
+  Target point within the currently displayed wedge.
+- **While throwing (turn in progress)**: the zoom panel is locked to the
+  confirmed Target's sector and **never changes**, regardless of where
+  on the full board a Throw Result is tapped. A wild throw that lands in
+  a different sector is only visible on the full board; a throw that
+  lands close to the Target is visible (and more precisely taggable) in
+  the zoom panel. This stays true even while adjusting/re-tapping an
+  already-logged throw (see Throw Slots below).
 
 ## Core Workflow
 
@@ -92,10 +103,12 @@ refinement and during Throw logging.
    is locked in and saved for the upcoming turn(s).
 4. **Log Throws** — user throws 3 real darts, then taps where each landed
    (on either panel, in any order) — 3 Throw Result points collected per
-   turn.
+   turn, populating the Throw Slots on the right as they're logged.
 5. **End Turn** — appears once 3 Throw Results are logged for the current
-   turn. Tapping it saves the turn, clears the 3 Throw Results, and starts
-   a new turn with the **same Target** still active.
+   turn. Before tapping it, any of the 3 logged throws can be adjusted
+   via its Throw Slot (see below). Tapping End Turn saves the turn,
+   clears the 3 Throw Results/slots, and starts a new turn with the
+   **same Target** still active.
 6. **Move Target** — available at any time between turns. Re-enters the
    Set Target flow (step 2) to choose a new target; otherwise the Target
    persists across turns by default.
@@ -107,6 +120,25 @@ number's center — the user can aim at any spot on the board (e.g. a
 specific treble, a spot just off the bullseye, etc.). Scoring logic
 (below) is only applied to interpret *Throw Results*, not to constrain
 where a Target can be set.
+
+## Throw Slots & Editing
+
+Three slots (labeled Dart A / B / C, matching the throw ID suffixes) sit
+to the right of the two board panels, for the current turn only:
+
+- Empty before that dart is thrown ("Not thrown").
+- Populated live as each throw is logged, showing its score label/value
+  and distance from Target (the same data described under Scoring &
+  Accuracy).
+- Once all 3 slots are filled (and only then — not while still logging
+  the 1st/2nd dart of the turn), the slots become tappable. Tapping a
+  slot arms it for editing; the next tap on **either board panel**
+  overwrites that dart's position (recomputing its score and distance)
+  instead of logging a new 4th throw, then editing turns off
+  automatically. Tapping an already-armed slot again disarms it without
+  changing anything.
+- Editing only applies to the in-progress turn, before End Turn is
+  tapped. Once End Turn is tapped the turn is final (see Out of Scope).
 
 ## Scoring & Accuracy
 
@@ -160,15 +192,23 @@ Throw
 - Standard dart games (501, cricket, etc.) — this is open-ended practice
   logging only
 - User accounts / multi-user support
-- Editing or deleting past throws/turns/games after the fact
+- Editing or deleting throws/turns/games once the turn has ended (End
+  Turn tapped) or the game has ended — only the 3 in-progress throws of
+  the *current, not-yet-ended* turn can be adjusted (see Throw Slots)
 - Portrait orientation support
 
 ## Confirmed Decisions
 
 1. **Ending a game**: explicit **End Game** button records `endedAt`.
-2. **Zoom panel trigger**: only taps on the **full board** change which
-   sector the zoom panel displays. Taps inside the zoom panel refine/log
-   a point within the currently displayed wedge only — they never change
-   the zoom window.
+2. **Zoom panel trigger**: while setting a Target, only taps on the
+   **full board** change which sector the zoom panel displays; zoom-panel
+   taps only refine the point. Once throwing starts, the zoom panel locks
+   to the Target's sector and never changes for the rest of the turn (or
+   subsequent turns), even while adjusting an already-logged throw —
+   full-board taps just log/adjust a Throw Result without moving the
+   zoom window.
 3. **Bounds**: a tap outside the board is a valid `Miss` throw (value 0),
    not ignored.
+4. **Throw Slots**: 3 slots on the right show the current turn's throws
+   as they're logged. Once all 3 are filled and before End Turn, tapping
+   a slot arms it so the next board tap overwrites that throw.

@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { BoardView, type BoardMarker } from "@/components/BoardView";
+import { ThrowSlots } from "@/components/ThrowSlots";
 import { createGame, createTurn, addThrow, endGame } from "@/lib/db";
 import { sectorCenterAngleDeg, sectorIndexForPoint } from "@/lib/dartboard";
-import type { Game, Point, Turn, ThrowRecord } from "@/lib/types";
+import type { Game, Point, Turn, ThrowRecord, ThrowSuffix } from "@/lib/types";
 
 const FULL_VIEW_BOX = "-250 -250 500 500";
 const ZOOM_VIEW_BOX = "-45 -232 90 252";
+const THROW_SUFFIXES: ThrowSuffix[] = ["a", "b", "c"];
 
 type Phase = "idle" | "setting-target" | "throwing";
 
@@ -21,6 +23,7 @@ export default function Home() {
   const [pendingTarget, setPendingTarget] = useState<Point | null>(null);
   const [confirmedTarget, setConfirmedTarget] = useState<Point | null>(null);
   const [currentThrows, setCurrentThrows] = useState<ThrowRecord[]>([]);
+  const [editingThrowIndex, setEditingThrowIndex] = useState<number | null>(null);
 
   const zoomRotationDeg = -sectorCenterAngleDeg(zoomSectorIndex);
 
@@ -44,13 +47,19 @@ export default function Home() {
     setTurn(null);
     setTurnNumber(0);
     setCurrentThrows([]);
+    setEditingThrowIndex(null);
     setPendingTarget(null);
     setConfirmedTarget(null);
     setPhase("setting-target");
   }
 
   function handleFullBoardPick(point: Point) {
-    setZoomSectorIndex(sectorIndexForPoint(point.x, point.y));
+    // The zoom panel only re-centers while choosing/refining a Target.
+    // Once throwing has started it stays locked on the Target's sector —
+    // see CLAUDE.md "Zoom behavior while throwing".
+    if (phase === "setting-target") {
+      setZoomSectorIndex(sectorIndexForPoint(point.x, point.y));
+    }
     handlePick(point);
   }
 
@@ -62,15 +71,32 @@ export default function Home() {
     if (phase === "setting-target") {
       setPendingTarget(point);
     } else if (phase === "throwing") {
-      void logThrow(point);
+      void logOrUpdateThrow(point);
     }
   }
 
-  async function logThrow(point: Point) {
-    if (!turn || currentThrows.length >= 3) return;
-    const suffix = (["a", "b", "c"] as const)[currentThrows.length];
+  async function logOrUpdateThrow(point: Point) {
+    if (!turn) return;
+
+    if (editingThrowIndex !== null) {
+      const suffix = THROW_SUFFIXES[editingThrowIndex];
+      const updated = await addThrow(turn, suffix, point);
+      setCurrentThrows((prev) =>
+        prev.map((t, i) => (i === editingThrowIndex ? updated : t))
+      );
+      setEditingThrowIndex(null);
+      return;
+    }
+
+    if (currentThrows.length >= 3) return;
+    const suffix = THROW_SUFFIXES[currentThrows.length];
     const throwRecord = await addThrow(turn, suffix, point);
     setCurrentThrows((prev) => [...prev, throwRecord]);
+  }
+
+  function handleSlotClick(index: number) {
+    if (currentThrows.length !== 3) return;
+    setEditingThrowIndex((prev) => (prev === index ? null : index));
   }
 
   async function handleConfirmTarget() {
@@ -82,6 +108,7 @@ export default function Home() {
     setConfirmedTarget(pendingTarget);
     setPendingTarget(null);
     setCurrentThrows([]);
+    setEditingThrowIndex(null);
     setPhase("throwing");
   }
 
@@ -92,12 +119,14 @@ export default function Home() {
     setTurn(newTurn);
     setTurnNumber(nextTurnNumber);
     setCurrentThrows([]);
+    setEditingThrowIndex(null);
   }
 
   function handleMoveTarget() {
     setPendingTarget(confirmedTarget);
     setConfirmedTarget(null);
     setTurn(null);
+    setEditingThrowIndex(null);
     setPhase("setting-target");
   }
 
@@ -108,6 +137,7 @@ export default function Home() {
     setTurn(null);
     setTurnNumber(0);
     setCurrentThrows([]);
+    setEditingThrowIndex(null);
     setPendingTarget(null);
     setConfirmedTarget(null);
     setPhase("idle");
@@ -155,38 +185,26 @@ export default function Home() {
             className="h-full max-h-[70vh] w-auto"
           />
         </div>
+        <ThrowSlots
+          throws={currentThrows}
+          editable={canEndTurn}
+          editingIndex={editingThrowIndex}
+          onSlotClick={handleSlotClick}
+        />
       </main>
 
-      <footer className="flex flex-col gap-3 border-t border-zinc-800 px-6 py-4">
-        {currentThrows.length > 0 && (
-          <div className="flex gap-4 text-sm text-zinc-300">
-            {currentThrows.map((t) => (
-              <span key={t.id}>
-                <span className="font-semibold text-yellow-400">{t.suffix.toUpperCase()}</span>{" "}
-                {t.score.label} ({t.score.value}) — {t.distanceFromTarget.toFixed(1)} units from target
-              </span>
-            ))}
-            {currentThrows.length === 3 && (
-              <span className="font-semibold text-zinc-100">
-                Turn total: {currentThrows.reduce((sum, t) => sum + t.score.value, 0)}
-              </span>
-            )}
-          </div>
+      <footer className="flex gap-2 border-t border-zinc-800 px-6 py-4">
+        {phase === "setting-target" && (
+          <Button disabled={!canConfirmTarget} onClick={handleConfirmTarget}>
+            Confirm Target
+          </Button>
         )}
-
-        <div className="flex gap-2">
-          {phase === "setting-target" && (
-            <Button disabled={!canConfirmTarget} onClick={handleConfirmTarget}>
-              Confirm Target
-            </Button>
-          )}
-          {canMoveTarget && (
-            <Button variant="secondary" onClick={handleMoveTarget}>
-              Move Target
-            </Button>
-          )}
-          {canEndTurn && <Button onClick={handleEndTurn}>End Turn?</Button>}
-        </div>
+        {canMoveTarget && (
+          <Button variant="secondary" onClick={handleMoveTarget}>
+            Move Target
+          </Button>
+        )}
+        {canEndTurn && <Button onClick={handleEndTurn}>End Turn?</Button>}
       </footer>
     </div>
   );
