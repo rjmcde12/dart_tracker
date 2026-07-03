@@ -1,17 +1,76 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BoardView, type BoardMarker } from "@/components/BoardView";
+import { BoardView, type BoardMarker, type BoardOverlayLabel } from "@/components/BoardView";
 import { ThrowSlots } from "@/components/ThrowSlots";
 import { createGame, createTurn, addThrow, endGame } from "@/lib/db";
-import { sectorCenterAngleDeg, sectorIndexForPoint } from "@/lib/dartboard";
+import {
+  RADII,
+  sectorCenterAngleDeg,
+  sectorIndexForPoint,
+  sectorNumberForIndex,
+} from "@/lib/dartboard";
 import type { Game, Point, Turn, ThrowRecord, ThrowSuffix } from "@/lib/types";
 
 const FULL_VIEW_BOX = "-250 -250 500 500";
-const ZOOM_VIEW_BOX = "-45 -232 90 252";
+// Sector wedge points up (bull at bottom): crop from the bull out past the
+// board edge on top, with a small buffer below center.
+const ZOOM_VIEW_BOX_UP = "-45 -232 90 252";
+// Sector wedge points down (bull at top): mirror image of the above.
+const ZOOM_VIEW_BOX_DOWN = "-45 -20 90 252";
+// Bull target: a square crop reaching out to just inside the treble ring.
+const BULL_ZOOM_VIEW_BOX = "-110 -110 220 220";
 const THROW_SUFFIXES: ThrowSuffix[] = ["a", "b", "c"];
 
 type Phase = "idle" | "setting-target" | "throwing";
+
+type ZoomTarget = { kind: "sector"; index: number } | { kind: "bull" };
+
+function computeZoomTarget(point: Point): ZoomTarget {
+  const r = Math.hypot(point.x, point.y);
+  if (r <= RADII.outerBullOuter) return { kind: "bull" };
+  return { kind: "sector", index: sectorIndexForPoint(point.x, point.y) };
+}
+
+interface ZoomInfo {
+  viewBox: string;
+  rotationDeg: number;
+  overlay: BoardOverlayLabel | null;
+}
+
+/**
+ * The zoom panel always keeps the same visual orientation as the printed
+ * board: rather than always forcing the targeted wedge to point up (which
+ * would flip bottom-half numbers upside-down), a sector on the board's right
+ * half (center angle < 180) points up with the bull at the bottom, while a
+ * sector on the left half (>= 180) points down with the bull at the top.
+ * The dartboard.svg's own number-ring text rotates along with the board and
+ * would end up sideways/upside-down, so it's masked out and replaced with an
+ * upright label placed at a fixed spot in the (unrotated) crop.
+ */
+function computeZoomInfo(target: ZoomTarget): ZoomInfo {
+  if (target.kind === "bull") {
+    return { viewBox: BULL_ZOOM_VIEW_BOX, rotationDeg: 0, overlay: null };
+  }
+
+  const angle = sectorCenterAngleDeg(target.index);
+  const sectorNumber = sectorNumberForIndex(target.index);
+  const pointsUp = angle < 180;
+
+  return {
+    viewBox: pointsUp ? ZOOM_VIEW_BOX_UP : ZOOM_VIEW_BOX_DOWN,
+    rotationDeg: pointsUp ? -angle : 180 - angle,
+    overlay: {
+      text: String(sectorNumber),
+      x: 0,
+      y: pointsUp ? -200 : 200,
+      maskX: -45,
+      maskY: pointsUp ? -232 : 165,
+      maskWidth: 90,
+      maskHeight: 67,
+    },
+  };
+}
 
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -19,13 +78,13 @@ export default function Home() {
   const [turn, setTurn] = useState<Turn | null>(null);
   const [turnNumber, setTurnNumber] = useState(0);
 
-  const [zoomSectorIndex, setZoomSectorIndex] = useState(0);
+  const [zoomTarget, setZoomTarget] = useState<ZoomTarget>({ kind: "sector", index: 0 });
   const [pendingTarget, setPendingTarget] = useState<Point | null>(null);
   const [confirmedTarget, setConfirmedTarget] = useState<Point | null>(null);
   const [currentThrows, setCurrentThrows] = useState<ThrowRecord[]>([]);
   const [editingThrowIndex, setEditingThrowIndex] = useState<number | null>(null);
 
-  const zoomRotationDeg = -sectorCenterAngleDeg(zoomSectorIndex);
+  const zoomInfo = useMemo(() => computeZoomInfo(zoomTarget), [zoomTarget]);
 
   const activeTargetPoint =
     phase === "setting-target" ? pendingTarget : confirmedTarget;
@@ -58,7 +117,7 @@ export default function Home() {
     // Once throwing has started it stays locked on the Target's sector —
     // see CLAUDE.md "Zoom behavior while throwing".
     if (phase === "setting-target") {
-      setZoomSectorIndex(sectorIndexForPoint(point.x, point.y));
+      setZoomTarget(computeZoomTarget(point));
     }
     handlePick(point);
   }
@@ -178,10 +237,11 @@ export default function Home() {
         </div>
         <div className="flex flex-1 items-center justify-center rounded-lg bg-zinc-900 p-4">
           <BoardView
-            viewBox={ZOOM_VIEW_BOX}
-            rotationDeg={zoomRotationDeg}
+            viewBox={zoomInfo.viewBox}
+            rotationDeg={zoomInfo.rotationDeg}
             markers={markers}
             onPick={handleZoomPick}
+            overlay={zoomInfo.overlay}
             className="h-full max-h-[70vh] w-auto"
           />
         </div>

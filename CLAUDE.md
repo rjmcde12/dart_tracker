@@ -68,13 +68,39 @@ Three panels side by side, landscape:
    on the full board — especially useful for a wild throw that lands far
    from the Target and wouldn't be visible in the zoomed panel.
 2. **Center — Zoomed Wedge**: a magnified crop of the sector the user is
-   currently targeting — from the bullseye out to the outer edge of the
-   double ring, spanning that sector's full 18° wedge, rotated so the
-   wedge points straight up (matches the mockup). Used to refine the
-   Target position and/or log Throw Results with more precision, for
-   throws that land close to the Target.
+   currently targeting, spanning that sector's full 18° wedge from the
+   bullseye out past the board edge. Used to refine the Target position
+   and/or log Throw Results with more precision, for throws that land
+   close to the Target. See "Zoom Orientation" below for exactly how it's
+   rotated. If the Target is in/near the bullseye instead of a numbered
+   wedge, this panel instead shows a square crop centered on the bull,
+   reaching out to just inside the treble ring (no single wedge applies).
 3. **Right — Throw Slots**: three slots (Dart A / B / C) for the current
    turn. See "Throw Slots & Editing" below.
+
+### Zoom Orientation
+
+The zoom panel always keeps the **same visual orientation as the printed
+board** — it does not naively rotate every targeted wedge to point up,
+because that would flip bottom-half sector numbers upside-down. Instead:
+
+- A sector on the board's **right half** (center angle < 180°, e.g. 6, 10,
+  13) is rotated so its wedge points **up**: double ring at the top, bull
+  at the bottom.
+- A sector on the board's **left half** (center angle >= 180°, e.g. 8, 11,
+  14, 19) is rotated so its wedge points **down** instead: double ring at
+  the bottom, bull at the top.
+- Example: triple 19 (center angle 198°, left half) shows double 19 at
+  the bottom and bull at the top.
+- The dartboard.svg's own number-ring text rotates along with the board
+  and would end up sideways/upside-down for many sectors, so it's masked
+  out (covered with a plain black patch, matching the number ring's own
+  black background) and replaced with an upright text label showing the
+  sector number, placed at a fixed spot in the unrotated crop (top for
+  the "points up" case, bottom for "points down").
+- A Target within the outer bull radius (see geometry table) uses the
+  square Bull crop instead (no rotation, no number label — 25/50 apply
+  regardless of angle).
 
 **Zoom panel behavior differs by phase:**
 

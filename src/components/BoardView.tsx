@@ -9,12 +9,29 @@ export interface BoardMarker {
   label?: string;
 }
 
+export interface BoardOverlayLabel {
+  text: string;
+  x: number;
+  y: number;
+  maskX: number;
+  maskY: number;
+  maskWidth: number;
+  maskHeight: number;
+}
+
 interface BoardViewProps {
   viewBox: string;
   rotationDeg: number;
   markers: BoardMarker[];
   onPick: (point: Point) => void;
   className?: string;
+  /**
+   * A number label rendered upright in fixed crop coordinates (outside the
+   * rotated board group), masking over the dartboard.svg's own number ring
+   * text — which would otherwise appear sideways/upside-down once the zoom
+   * panel rotates the board to orient the targeted sector up or down.
+   */
+  overlay?: BoardOverlayLabel | null;
 }
 
 export function BoardView({
@@ -23,6 +40,7 @@ export function BoardView({
   markers,
   onPick,
   className,
+  overlay,
 }: BoardViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const groupRef = useRef<SVGGElement>(null);
@@ -57,6 +75,28 @@ export function BoardView({
           <MarkerShape key={i} marker={marker} rotationDeg={rotationDeg} />
         ))}
       </g>
+      {overlay && (
+        <g>
+          <rect
+            x={overlay.maskX}
+            y={overlay.maskY}
+            width={overlay.maskWidth}
+            height={overlay.maskHeight}
+            fill="#000000"
+          />
+          <text
+            x={overlay.x}
+            y={overlay.y}
+            fontSize={30}
+            fontWeight={700}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fill="#c0c0c0"
+          >
+            {overlay.text}
+          </text>
+        </g>
+      )}
     </svg>
   );
 }
