@@ -13,13 +13,18 @@ import {
 import type { Game, Point, Turn, ThrowRecord, ThrowSuffix } from "@/lib/types";
 
 const FULL_VIEW_BOX = "-250 -250 500 500";
-// Sector wedge points up (bull at bottom): crop from the bull out past the
-// board edge on top, with a small buffer below center.
-const ZOOM_VIEW_BOX_UP = "-45 -232 90 252";
+// Sector wedge points up (bull at bottom): crop from the bull out well past
+// the board edge on top (extra margin so near-miss throws stay visible),
+// with a small buffer below center.
+const ZOOM_VIEW_BOX_UP = "-55 -260 110 280";
 // Sector wedge points down (bull at top): mirror image of the above.
-const ZOOM_VIEW_BOX_DOWN = "-45 -20 90 252";
+const ZOOM_VIEW_BOX_DOWN = "-55 -20 110 280";
 // Bull target: a square crop reaching out to just inside the treble ring.
 const BULL_ZOOM_VIEW_BOX = "-110 -110 220 220";
+// The number-ring mask/label sit strictly between the double ring's outer
+// edge and the board edge, so they never cut into the double ring itself.
+const NUMBER_BAND_INNER = RADII.doubleOuter + 0.5; // 170
+const NUMBER_BAND_OUTER = RADII.boardEdge; // 226
 const THROW_SUFFIXES: ThrowSuffix[] = ["a", "b", "c"];
 
 type Phase = "idle" | "setting-target" | "throwing";
@@ -57,17 +62,19 @@ function computeZoomInfo(target: ZoomTarget): ZoomInfo {
   const sectorNumber = sectorNumberForIndex(target.index);
   const pointsUp = angle < 180;
 
+  const bandHeight = NUMBER_BAND_OUTER - NUMBER_BAND_INNER;
+
   return {
     viewBox: pointsUp ? ZOOM_VIEW_BOX_UP : ZOOM_VIEW_BOX_DOWN,
     rotationDeg: pointsUp ? -angle : 180 - angle,
     overlay: {
       text: String(sectorNumber),
       x: 0,
-      y: pointsUp ? -200 : 200,
-      maskX: -45,
-      maskY: pointsUp ? -232 : 165,
-      maskWidth: 90,
-      maskHeight: 67,
+      y: pointsUp ? -(NUMBER_BAND_INNER + bandHeight / 2) : NUMBER_BAND_INNER + bandHeight / 2,
+      maskX: -55,
+      maskY: pointsUp ? -NUMBER_BAND_OUTER : NUMBER_BAND_INNER,
+      maskWidth: 110,
+      maskHeight: bandHeight,
     },
   };
 }
@@ -250,6 +257,8 @@ export default function Home() {
           editable={canEndTurn}
           editingIndex={editingThrowIndex}
           onSlotClick={handleSlotClick}
+          canEndTurn={canEndTurn}
+          onEndTurn={handleEndTurn}
         />
       </main>
 
@@ -264,7 +273,6 @@ export default function Home() {
             Move Target
           </Button>
         )}
-        {canEndTurn && <Button onClick={handleEndTurn}>End Turn?</Button>}
       </footer>
     </div>
   );

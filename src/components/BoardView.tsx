@@ -69,11 +69,12 @@ export function BoardView({
       onPointerDown={handlePointerDown}
       style={{ touchAction: "none" }}
     >
+      {/* Image and markers share the same transform but are split into two
+          groups so the number-ring mask can sit between them: it must paint
+          over the image's own (possibly sideways/upside-down) number text,
+          but under the markers so a near-miss throw is never hidden by it. */}
       <g ref={groupRef} transform={`rotate(${rotationDeg})`}>
         <image href="/dartboard.svg" x={-250} y={-250} width={500} height={500} />
-        {markers.map((marker, i) => (
-          <MarkerShape key={i} marker={marker} rotationDeg={rotationDeg} />
-        ))}
       </g>
       {overlay && (
         <g>
@@ -97,6 +98,11 @@ export function BoardView({
           </text>
         </g>
       )}
+      <g transform={`rotate(${rotationDeg})`}>
+        {markers.map((marker, i) => (
+          <MarkerShape key={i} marker={marker} rotationDeg={rotationDeg} />
+        ))}
+      </g>
     </svg>
   );
 }

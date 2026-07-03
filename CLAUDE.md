@@ -101,6 +101,13 @@ because that would flip bottom-half sector numbers upside-down. Instead:
 - A Target within the outer bull radius (see geometry table) uses the
   square Bull crop instead (no rotation, no number label — 25/50 apply
   regardless of angle).
+- The wedge crop shows the **full double ring plus a margin beyond the
+  board edge**, so a near-miss throw that lands just outside the wire is
+  still visible and taggable rather than being clipped off. The number
+  mask is sized to cover only the number-ring band (between the double
+  ring's outer edge and the board edge) so it never cuts into the double
+  ring itself, and it's layered *below* throw/target markers so a
+  near-miss marker landing in that band is never hidden underneath it.
 
 **Zoom panel behavior differs by phase:**
 
@@ -165,6 +172,9 @@ to the right of the two board panels, for the current turn only:
   changing anything.
 - Editing only applies to the in-progress turn, before End Turn is
   tapped. Once End Turn is tapped the turn is final (see Out of Scope).
+- The **End Turn?** button lives in this panel, below the turn total,
+  rather than in the page footer — it only appears once all 3 slots are
+  filled, right next to the results it's finalizing.
 
 ## Scoring & Accuracy
 

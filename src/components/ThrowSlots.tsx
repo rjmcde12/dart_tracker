@@ -9,6 +9,8 @@ interface ThrowSlotsProps {
   editable: boolean;
   editingIndex: number | null;
   onSlotClick: (index: number) => void;
+  canEndTurn: boolean;
+  onEndTurn: () => void;
 }
 
 export function ThrowSlots({
@@ -16,6 +18,8 @@ export function ThrowSlots({
   editable,
   editingIndex,
   onSlotClick,
+  canEndTurn,
+  onEndTurn,
 }: ThrowSlotsProps) {
   const total = throws.reduce((sum, t) => sum + t.score.value, 0);
 
@@ -59,6 +63,16 @@ export function ThrowSlots({
         <div className="mt-1 border-t border-zinc-700 pt-3 text-sm font-semibold text-zinc-100">
           Turn total: {total}
         </div>
+      )}
+
+      {canEndTurn && (
+        <button
+          type="button"
+          onClick={onEndTurn}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+        >
+          End Turn?
+        </button>
       )}
     </div>
   );
