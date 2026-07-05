@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { BoardView, type BoardMarker, type BoardOverlayLabel } from "@/components/BoardView";
+import { BoardView, type BoardMarker } from "@/components/BoardView";
 import { ThrowSlots } from "@/components/ThrowSlots";
 import { NewGameModal } from "@/components/NewGameModal";
 import { CricketResultsModal } from "@/components/CricketResultsModal";
@@ -15,13 +15,7 @@ import {
   getAllTurns,
   getThrowsForTurn,
 } from "@/lib/db";
-import {
-  RADII,
-  nearestNumberOrBullLabel,
-  sectorCenterAngleDeg,
-  sectorIndexForPoint,
-  sectorNumberForIndex,
-} from "@/lib/dartboard";
+import { boardCropViewBox, nearestNumberOrBullLabel } from "@/lib/dartboard";
 import {
   CRICKET_SEQUENCE,
   cricketTallyForTurn,
@@ -38,36 +32,15 @@ import type {
   ThrowSuffix,
 } from "@/lib/types";
 
-const FULL_VIEW_BOX = "-250 -250 500 500";
-// Sector wedge points up (bull at bottom): crop from the bull out well past
-// the board edge on top (extra margin so near-miss throws stay visible),
-// with a small buffer below center.
-const ZOOM_VIEW_BOX_UP = "-55 -260 110 280";
-// Sector wedge points down (bull at top): mirror image of the above.
-const ZOOM_VIEW_BOX_DOWN = "-55 -20 110 280";
-// Bull target: a square crop reaching out to just inside the treble ring.
-const BULL_ZOOM_VIEW_BOX = "-110 -110 220 220";
-// The number-ring mask/label sit strictly between the double ring's outer
-// edge and the board edge, so they never cut into the double ring itself.
-const NUMBER_BAND_INNER = RADII.doubleOuter + 0.5; // 170
-const NUMBER_BAND_OUTER = RADII.boardEdge; // 226
 const THROW_SUFFIXES: ThrowSuffix[] = ["a", "b", "c"];
 
 type Phase = "idle" | "setting-target" | "throwing";
-
-type ZoomTarget = { kind: "sector"; index: number } | { kind: "bull" };
 
 interface EditingPastTurn {
   label: string;
   turn: Turn;
   throws: ThrowRecord[];
   onUpdate: (throws: ThrowRecord[]) => void;
-}
-
-function computeZoomTarget(point: Point): ZoomTarget {
-  const r = Math.hypot(point.x, point.y);
-  if (r <= RADII.outerBullOuter) return { kind: "bull" };
-  return { kind: "sector", index: sectorIndexForPoint(point.x, point.y) };
 }
 
 /** Highest tally ever recorded (across all past cricket games) for each target. */
@@ -93,55 +66,12 @@ async function computeCricketBestTallies(): Promise<Record<string, number>> {
   return best;
 }
 
-interface ZoomInfo {
-  viewBox: string;
-  rotationDeg: number;
-  overlay: BoardOverlayLabel | null;
-}
-
-/**
- * The zoom panel always keeps the same visual orientation as the printed
- * board: rather than always forcing the targeted wedge to point up (which
- * would flip bottom-half numbers upside-down), a sector on the board's right
- * half (center angle < 180) points up with the bull at the bottom, while a
- * sector on the left half (>= 180) points down with the bull at the top.
- * The dartboard.svg's own number-ring text rotates along with the board and
- * would end up sideways/upside-down, so it's masked out and replaced with an
- * upright label placed at a fixed spot in the (unrotated) crop.
- */
-function computeZoomInfo(target: ZoomTarget): ZoomInfo {
-  if (target.kind === "bull") {
-    return { viewBox: BULL_ZOOM_VIEW_BOX, rotationDeg: 0, overlay: null };
-  }
-
-  const angle = sectorCenterAngleDeg(target.index);
-  const sectorNumber = sectorNumberForIndex(target.index);
-  const pointsUp = angle < 180;
-
-  const bandHeight = NUMBER_BAND_OUTER - NUMBER_BAND_INNER;
-
-  return {
-    viewBox: pointsUp ? ZOOM_VIEW_BOX_UP : ZOOM_VIEW_BOX_DOWN,
-    rotationDeg: pointsUp ? -angle : 180 - angle,
-    overlay: {
-      text: String(sectorNumber),
-      x: 0,
-      y: pointsUp ? -(NUMBER_BAND_INNER + bandHeight / 2) : NUMBER_BAND_INNER + bandHeight / 2,
-      maskX: -55,
-      maskY: pointsUp ? -NUMBER_BAND_OUTER : NUMBER_BAND_INNER,
-      maskWidth: 110,
-      maskHeight: bandHeight,
-    },
-  };
-}
-
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [game, setGame] = useState<Game | null>(null);
   const [turn, setTurn] = useState<Turn | null>(null);
   const [turnNumber, setTurnNumber] = useState(0);
 
-  const [zoomTarget, setZoomTarget] = useState<ZoomTarget>({ kind: "sector", index: 0 });
   const [pendingTarget, setPendingTarget] = useState<Point | null>(null);
   const [confirmedTarget, setConfirmedTarget] = useState<Point | null>(null);
   const [currentThrows, setCurrentThrows] = useState<ThrowRecord[]>([]);
@@ -150,6 +80,11 @@ export default function Home() {
   // so two taps fired back-to-back can never both claim the same dart slot.
   const nextThrowIndexRef = useRef(0);
   const currentThrowsRef = useRef<ThrowRecord[]>([]);
+
+  // Manual override to see the whole board instead of the current Target's
+  // zoomed crop — for tapping a wild throw that landed outside it. Reverts
+  // automatically after the next tap.
+  const [showFullBoardOverride, setShowFullBoardOverride] = useState(false);
 
   const [showNewGameModal, setShowNewGameModal] = useState(false);
   const [cricketVariant, setCricketVariant] = useState<CricketVariant | null>(null);
@@ -165,14 +100,17 @@ export default function Home() {
   const [editingPastTurn, setEditingPastTurn] = useState<EditingPastTurn | null>(null);
   const [editingThrowIndex, setEditingThrowIndex] = useState<number | null>(null);
 
-  const zoomInfo = useMemo(() => computeZoomInfo(zoomTarget), [zoomTarget]);
-
   const displayedTarget = editingPastTurn
     ? editingPastTurn.turn.target
     : phase === "setting-target"
       ? pendingTarget
       : confirmedTarget;
   const displayedThrows = editingPastTurn ? editingPastTurn.throws : currentThrows;
+
+  const boardViewBox = useMemo(
+    () => boardCropViewBox(showFullBoardOverride ? null : displayedTarget),
+    [showFullBoardOverride, displayedTarget]
+  );
 
   const markers: BoardMarker[] = useMemo(() => {
     const list: BoardMarker[] = [];
@@ -202,6 +140,7 @@ export default function Home() {
     nextThrowIndexRef.current = 0;
     setPendingTarget(null);
     setConfirmedTarget(null);
+    setShowFullBoardOverride(false);
     setCricketVariant(null);
     setCricketSequenceIndex(0);
     setCricketTurns({});
@@ -221,6 +160,7 @@ export default function Home() {
     nextThrowIndexRef.current = 0;
     setPendingTarget(null);
     setConfirmedTarget(null);
+    setShowFullBoardOverride(false);
     setFreePlayHistory([]);
     setEditingPastTurn(null);
     setEditingThrowIndex(null);
@@ -246,37 +186,23 @@ export default function Home() {
     setCurrentThrows([]);
     currentThrowsRef.current = [];
     nextThrowIndexRef.current = 0;
+    setShowFullBoardOverride(false);
     setEditingPastTurn(null);
     setEditingThrowIndex(null);
-    setZoomTarget(computeZoomTarget(targetPoint));
     setShowNewGameModal(false);
     setPhase("throwing");
   }
 
-  function handleFullBoardPick(point: Point) {
-    // The zoom panel only re-centers while choosing/refining a Target.
-    // Once throwing has started it stays locked on the Target's sector —
-    // see CLAUDE.md "Zoom behavior while throwing".
-    if (phase === "setting-target" && !editingPastTurn) {
-      setZoomTarget(computeZoomTarget(point));
-    }
-    handlePick(point);
-  }
-
-  function handleZoomPick(point: Point) {
-    handlePick(point);
-  }
-
   function handlePick(point: Point) {
+    const wasOverriding = showFullBoardOverride;
     if (editingPastTurn) {
       void handlePastTurnEditTap(point);
-      return;
-    }
-    if (phase === "setting-target") {
+    } else if (phase === "setting-target") {
       setPendingTarget(point);
     } else if (phase === "throwing") {
       void logOrUpdateThrow(point);
     }
+    if (wasOverriding) setShowFullBoardOverride(false);
   }
 
   async function handlePastTurnEditTap(point: Point) {
@@ -386,7 +312,6 @@ export default function Home() {
     setCurrentThrows([]);
     currentThrowsRef.current = [];
     nextThrowIndexRef.current = 0;
-    setZoomTarget(computeZoomTarget(nextTargetPoint));
   }
 
   function handleMoveTarget() {
@@ -416,7 +341,6 @@ export default function Home() {
   function handleDoneEditing() {
     setEditingPastTurn(null);
     setEditingThrowIndex(null);
-    if (confirmedTarget) setZoomTarget(computeZoomTarget(confirmedTarget));
   }
 
   function handleEditCricketRow(key: string) {
@@ -435,7 +359,6 @@ export default function Home() {
         setCricketTurns((prev) => ({ ...prev, [key]: { turn: record.turn, throws } })),
     });
     setEditingThrowIndex(null);
-    setZoomTarget(computeZoomTarget(record.turn.target));
   }
 
   function handleEditFreePlayRow(index: number) {
@@ -453,7 +376,6 @@ export default function Home() {
         setFreePlayHistory((prev) => prev.map((r, i) => (i === index ? { ...r, throws } : r))),
     });
     setEditingThrowIndex(null);
-    setZoomTarget(computeZoomTarget(record.turn.target));
   }
 
   const canConfirmTarget = phase === "setting-target" && pendingTarget !== null && !editingPastTurn;
@@ -462,6 +384,7 @@ export default function Home() {
     currentThrows.length === 0 &&
     game?.mode !== "cricket-practice" &&
     !editingPastTurn;
+  const canToggleFullBoard = displayedTarget !== null;
 
   const editingCricketKey =
     editingPastTurn?.turn.cricketTarget
@@ -491,20 +414,9 @@ export default function Home() {
       <main className="flex flex-1 items-stretch gap-4 p-4">
         <div className="flex flex-1 items-center justify-center rounded-lg bg-zinc-900 p-4">
           <BoardView
-            viewBox={FULL_VIEW_BOX}
-            rotationDeg={0}
+            viewBox={boardViewBox}
             markers={markers}
-            onPick={handleFullBoardPick}
-            className="h-full max-h-[70vh] w-auto"
-          />
-        </div>
-        <div className="flex flex-1 items-center justify-center rounded-lg bg-zinc-900 p-4">
-          <BoardView
-            viewBox={zoomInfo.viewBox}
-            rotationDeg={zoomInfo.rotationDeg}
-            markers={markers}
-            onPick={handleZoomPick}
-            overlay={zoomInfo.overlay}
+            onPick={handlePick}
             className="h-full max-h-[70vh] w-auto"
           />
         </div>
@@ -538,6 +450,14 @@ export default function Home() {
       </main>
 
       <footer className="flex gap-2 border-t border-zinc-800 px-6 py-4">
+        {canToggleFullBoard && (
+          <Button
+            variant="secondary"
+            onClick={() => setShowFullBoardOverride((v) => !v)}
+          >
+            {showFullBoardOverride ? "Zoomed View" : "Full Board"}
+          </Button>
+        )}
         {canMoveTarget && (
           <Button variant="secondary" onClick={handleMoveTarget}>
             Move Target
@@ -573,7 +493,7 @@ function statusLine(
   cricketSequenceIndex: number,
   editingPastTurn: EditingPastTurn | null
 ) {
-  if (editingPastTurn) return `Editing ${editingPastTurn.label} — tap a dart slot, then a board.`;
+  if (editingPastTurn) return `Editing ${editingPastTurn.label} — tap a dart slot, then the board.`;
   if (phase === "idle") return "Tap New Game to begin a practice session.";
   if (game?.mode === "cricket-practice") {
     const spec = CRICKET_SEQUENCE[cricketSequenceIndex];
@@ -581,7 +501,7 @@ function statusLine(
     return `Cricket Practice — Target ${label} — ${throwsLogged}/3 darts logged.`;
   }
   if (phase === "setting-target")
-    return "Tap the full board to set your target, refine it, then confirm.";
+    return "Tap the board to set your target, refine it, then confirm.";
   return `Turn ${turnNumber} — ${throwsLogged}/3 darts logged.`;
 }
 

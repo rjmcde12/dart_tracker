@@ -109,3 +109,73 @@ export function nearestNumberOrBullLabel(point: Point): string {
   if (r <= RADII.outerBullOuter) return "Bull";
   return String(sectorNumberForIndex(sectorIndexForPoint(point.x, point.y)));
 }
+
+export const FULL_BOARD_VIEW_BOX = "-250 -250 500 500";
+// Square crop for a Target in/near the bull, reaching to just inside the treble ring.
+export const BULL_VIEW_BOX = "-110 -110 220 220";
+
+// How far past a sector's own 18° width the crop extends on each side —
+// past the SECTOR_ANGLE_DEG (18) needed to reach the adjacent sectors'
+// center lines, plus a few more degrees so their number labels aren't
+// cut off right at the edge.
+const WEDGE_HALF_ANGLE_DEG = SECTOR_ANGLE_DEG + 5;
+// Radius the crop reaches out to — beyond the board edge (226), so a
+// near-miss throw just outside the wire is still visible and taggable.
+const WEDGE_CONTEXT_RADIUS = 250;
+const WEDGE_PADDING = 16;
+
+function polarToWorld(radius: number, angleDeg: number): Point {
+  const rad = (angleDeg * Math.PI) / 180;
+  return { x: radius * Math.sin(rad), y: -radius * Math.cos(rad) };
+}
+
+function angleWithinRange(angleDeg: number, loDeg: number, hiDeg: number): boolean {
+  const norm = (a: number) => ((a % 360) + 360) % 360;
+  const a = norm(angleDeg);
+  const lo = norm(loDeg);
+  const hi = norm(hiDeg);
+  return lo <= hi ? a >= lo && a <= hi : a >= lo || a <= hi;
+}
+
+/**
+ * A viewBox tightly fit around one sector's full wedge (from the bull out
+ * past the board edge), with no rotation, sized to also reveal the
+ * neighboring sectors' number labels for context. Computed by sampling the
+ * wedge's outline (its two straight radial edges' outer corners, the bull,
+ * and — where the outer arc crosses a cardinal direction within the wedge's
+ * angular span — that bulge point too) rather than a closed-form formula,
+ * since the bounding box shape differs for each of the 20 possible
+ * orientations.
+ */
+export function wedgeViewBox(index: number): string {
+  const centerAngle = sectorCenterAngleDeg(index);
+  const loAngle = centerAngle - WEDGE_HALF_ANGLE_DEG;
+  const hiAngle = centerAngle + WEDGE_HALF_ANGLE_DEG;
+
+  const sampleAngles = [loAngle, hiAngle];
+  for (const cardinal of [0, 90, 180, 270]) {
+    if (angleWithinRange(cardinal, loAngle, hiAngle)) sampleAngles.push(cardinal);
+  }
+
+  const points = [
+    { x: 0, y: 0 },
+    ...sampleAngles.map((a) => polarToWorld(WEDGE_CONTEXT_RADIUS, a)),
+  ];
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+
+  const minX = Math.min(...xs) - WEDGE_PADDING;
+  const maxX = Math.max(...xs) + WEDGE_PADDING;
+  const minY = Math.min(...ys) - WEDGE_PADDING;
+  const maxY = Math.max(...ys) + WEDGE_PADDING;
+
+  return `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
+}
+
+/** The single board panel's viewBox for a given Target (or the full board if none). */
+export function boardCropViewBox(target: Point | null): string {
+  if (!target) return FULL_BOARD_VIEW_BOX;
+  const r = Math.hypot(target.x, target.y);
+  if (r <= RADII.outerBullOuter) return BULL_VIEW_BOX;
+  return wedgeViewBox(sectorIndexForPoint(target.x, target.y));
+}

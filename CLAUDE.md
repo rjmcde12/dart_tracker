@@ -27,10 +27,11 @@ coordinate system, scoring, persistence) that every mode builds on.
 ## Assets
 
 - `dartboard.svg` — full standard dartboard graphic, used as the source
-  for both the full-board panel and the zoomed wedge panel. `viewBox="-250
-  -250 500 500"`, centered on the bullseye at `(0,0)`.
-- `layout.pdf` — UI mockup: full board on the left, zoomed wedge view on
-  the right.
+  for the single board panel in both its full-board and zoomed-crop
+  states. `viewBox="-250 -250 500 500"`, centered on the bullseye at
+  `(0,0)`.
+- `layout.pdf` — original UI mockup (full board + a separate zoomed wedge
+  view); superseded by the single-panel design below, kept for history.
 
 ### Dartboard geometry reference (from `dartboard.svg`)
 
@@ -59,77 +60,77 @@ scoring.
 - All positions (Target and Throw Results) are stored as `{ x, y }` in
   the **same coordinate space as `dartboard.svg`'s viewBox** (i.e.
   `-250..250` on both axes, origin at the bullseye).
-- The UI maps pointer/tap events on either the full-board SVG or the
-  zoomed wedge SVG back into this same `(x, y)` space before storing —
-  so a throw logged via the zoom panel and a throw logged via the full
-  board are stored identically.
+- The UI maps pointer/tap events on the board panel back into this same
+  `(x, y)` space before storing, regardless of whether the panel is
+  currently showing the full board or a zoomed crop — a throw logged
+  while zoomed in and one logged on the full board are stored identically
+  (`BoardView`'s `getScreenCTM()`-based mapping just adapts to whatever
+  `viewBox` is currently active).
 
-## UI Layout (per `layout.pdf`)
+## UI Layout
 
-Three panels side by side, landscape:
+**One large board panel**, plus the Throw Slots sidebar:
 
-1. **Left — Full Dartboard**: the complete `dartboard.svg`. Used to (a)
-   pick the initial Target, and (b) optionally log Throw Results directly
-   on the full board — especially useful for a wild throw that lands far
-   from the Target and wouldn't be visible in the zoomed panel.
-2. **Center — Zoomed Wedge**: a magnified crop of the sector the user is
-   currently targeting, spanning that sector's full 18° wedge from the
-   bullseye out past the board edge. Used to refine the Target position
-   and/or log Throw Results with more precision, for throws that land
-   close to the Target. See "Zoom Orientation" below for exactly how it's
-   rotated. If the Target is in/near the bullseye instead of a numbered
-   wedge, this panel instead shows a square crop centered on the bull,
-   reaching out to just inside the treble ring (no single wedge applies).
-3. **Right — Throw Slots**: three slots (Dart 1 / 2 / 3) for the current
-   turn. See "Throw Slots & Editing" below.
+1. **Board panel**: the complete `dartboard.svg`, shown either as the
+   full board or zoomed into the current Target — see "Board Zoom"
+   below for exactly which and when.
+2. **Throw Slots** (sidebar): three slots (Dart 1 / 2 / 3) for the
+   current turn. See "Throw Slots & Editing" below.
 
-### Zoom Orientation
+### Board Zoom
 
-The zoom panel always keeps the **same visual orientation as the printed
-board** — it does not naively rotate every targeted wedge to point up,
-because that would flip bottom-half sector numbers upside-down. Instead:
+The single board panel shows the **full board** whenever there's no
+Target to zoom to (idle, or Free Play before the first tap of Set
+Target). As soon as a Target exists — pending, confirmed, or one being
+edited (see "Editing a past turn") — it zooms into that Target's area,
+recomputed fresh any time the relevant Target changes. There's no
+separate "zoom state" to track: the crop is a pure function of whichever
+Target is currently relevant (`boardCropViewBox` in `dartboard.ts`).
 
-- A sector on the board's **right half** (center angle < 180°, e.g. 6, 10,
-  13) is rotated so its wedge points **up**: double ring at the top, bull
-  at the bottom.
-- A sector on the board's **left half** (center angle >= 180°, e.g. 8, 11,
-  14, 19) is rotated so its wedge points **down** instead: double ring at
-  the bottom, bull at the top.
-- Example: triple 19 (center angle 198°, left half) shows double 19 at
-  the bottom and bull at the top.
-- The dartboard.svg's own number-ring text rotates along with the board
-  and would end up sideways/upside-down for many sectors, so it's masked
-  out (covered with a plain black patch, matching the number ring's own
-  black background) and replaced with an upright text label showing the
-  sector number, placed at a fixed spot in the unrotated crop (top for
-  the "points up" case, bottom for "points down").
-- A Target within the outer bull radius (see geometry table) uses the
-  square Bull crop instead (no rotation, no number label — 25/50 apply
-  regardless of angle).
-- The wedge crop shows the **full double ring plus a margin beyond the
-  board edge**, so a near-miss throw that lands just outside the wire is
-  still visible and taggable rather than being clipped off. The number
-  mask is sized to cover only the number-ring band (between the double
-  ring's outer edge and the board edge) so it never cuts into the double
-  ring itself, and it's layered *below* throw/target markers so a
-  near-miss marker landing in that band is never hidden underneath it.
+Rules the zoom crop always follows:
 
-**Zoom panel behavior differs by phase:**
+- **No rotation, ever.** The board is never rotated to make a wedge
+  point in any particular direction — it zooms in place, so the printed
+  numbers are always in their normal, correctly-oriented position. (This
+  replaced an earlier design that rotated the crop and masked/redrew the
+  number labels to compensate — no longer needed now that nothing
+  rotates.)
+- **The full wedge is always shown.** For a Target in a numbered sector,
+  the crop is fit tightly around that sector's entire 18° wedge from the
+  bull outward — both straight edges and the outer arc — regardless of
+  which of the 20 possible directions the wedge points. Since a
+  non-rotating crop's bounding shape is different for every orientation
+  (a wedge pointing straight up needs a tall crop, one pointing sideways
+  needs a wide one, a diagonal one needs something in between,
+  potentially bulging further at any cardinal direction — 0/90/180/270°
+  — the wedge's outer arc happens to cross), this is computed by
+  sampling the wedge's outline rather than a single formula — see
+  `wedgeViewBox` in `dartboard.ts`.
+- **The full bullseye is always visible**, since the wedge's inner point
+  is the bull itself.
+- **Some area beyond the double ring is included** (`WEDGE_CONTEXT_RADIUS
+  = 250`, vs. the board edge at 226), so a near-miss throw just outside
+  the wire is still visible and taggable rather than clipped off.
+- **Adjacent sectors' number labels are clearly shown.** The crop's
+  angular span is wider than the target sector's own 18° — reaching
+  `SECTOR_ANGLE_DEG + 5` degrees past center on each side (past the
+  neighboring sectors' own center lines) — so both neighboring numbers
+  are legible for orientation/context.
+- A Target within the outer bull radius uses a separate square crop
+  (`BULL_VIEW_BOX`) centered on the bull, reaching to just inside the
+  treble ring — there's no single wedge to fit around a bull Target.
 
-- **While setting a Target**: only taps on the **full board** change
-  which sector/wedge the zoom panel displays. Taps inside the zoom panel
-  itself never change the zoom window — they only refine the pending
-  Target point within the currently displayed wedge.
-- **While throwing (turn in progress)**: the zoom panel is locked to the
-  confirmed Target's sector and **never changes**, regardless of where
-  on the full board a Throw Result is tapped. A wild throw that lands in
-  a different sector is only visible on the full board; a throw that
-  lands close to the Target is visible (and more precisely taggable) in
-  the zoom panel.
-- **While editing a past turn** (see Throw Slots & Editing below): the
-  zoom panel switches to that turn's own Target sector for the duration
-  of the edit, so its darts can be retargeted precisely, then switches
-  back to the live current turn's sector once editing is done.
+### Full Board toggle
+
+Because the zoomed crop is tightly fit to one Target's wedge, a wild
+throw that lands well outside it can't be tapped directly — there's
+nothing else on screen to click. A **Full Board** button (footer,
+whenever a Target exists) temporarily shows the whole board instead;
+tapping anywhere on it (to log a throw, refine a pending Target, or
+adjust an armed dart during past-turn editing) automatically reverts
+back to the zoomed crop afterward. The button's label reflects the
+current state (`Full Board` / `Zoomed View`) and it can also be tapped
+again manually to switch back without making a tap first.
 
 ## Core Workflow
 
@@ -139,19 +140,19 @@ because that would flip bottom-half sector numbers upside-down. Instead:
    how it drives Target placement. Choosing a mode creates the Game record
    (id + mode + start timestamp) and begins the session.
 2. **Set Target** — *(Free Play only — other modes place the Target
-   automatically; see GAME_MODES.md)*. User taps a point on the full
-   dartboard. The zoomed wedge panel updates to show that sector. The user
-   can refine the exact point by tapping again on the full board (which
-   may also jump the zoom panel to a different sector) or by tapping
-   inside the zoom panel (which only refines the point within the
-   currently displayed wedge). Each tap replaces the pending Target
-   position.
+   automatically; see GAME_MODES.md)*. User taps a point on the (initially
+   full) board panel, which then zooms into that sector — see "Board
+   Zoom" above. Tapping again (in the now-zoomed view, or via the Full
+   Board toggle for a bigger change of mind) refines/replaces the pending
+   Target position, and the crop re-fits itself each time.
 3. **Confirm Target** — *(Free Play only)*. Button in the Throw Slots
    panel (see below). Locks in the Target position for the upcoming
    turn(s).
 4. **Log Throws** — user throws 3 real darts, then taps where each landed
-   (on either panel, in any order) — 3 Throw Result points collected per
-   turn, populating the Throw Slots on the right as they're logged.
+   on the board panel — 3 Throw Result points collected per turn,
+   populating the Throw Slots on the right as they're logged. A throw
+   close to the Target is easy to tap precisely in the zoomed crop; a
+   wild throw needs the Full Board toggle first (see above).
 5. **Turn ends automatically** — the instant the 3rd dart is logged (no
    button to tap), the turn is saved and the app either starts a new turn
    with the same Target (Free Play) or auto-advances to the mode's next
@@ -175,7 +176,7 @@ where a Target can be set.
 
 Three slots (labeled Dart 1 / 2 / 3, one per dart of the turn — the
 underlying Throw record IDs still use the `a`/`b`/`c` suffix from the Data
-Model below) sit to the right of the two board panels:
+Model below) sit to the right of the board panel:
 
 - Empty before that dart is thrown ("Not thrown").
 - Populated live as each throw is logged, showing its score label/value
@@ -198,13 +199,14 @@ fixed:
 
 1. Tapping a played row enters editing for that turn: the Throw Slots
    panel swaps from showing the live current turn to showing that past
-   turn's 3 darts instead (with a header naming which turn), the board
-   panels show that turn's Target and darts, and the zoom panel switches
-   to that turn's Target sector.
-2. Tapping one of the 3 slots arms it; the next tap on **either board
-   panel** overwrites that dart's position (recomputing its score,
-   distance, and — for Cricket — its marks), then disarms automatically.
-   Repeat for any other dart in that turn that needs fixing.
+   turn's 3 darts instead (with a header naming which turn), and the
+   board panel shows that turn's Target and darts, zoomed to its Target's
+   wedge.
+2. Tapping one of the 3 slots arms it; the next tap on the board panel
+   (zoomed or, via the Full Board toggle, the whole board) overwrites
+   that dart's position (recomputing its score, distance, and — for
+   Cricket — its marks), then disarms automatically. Repeat for any other
+   dart in that turn that needs fixing.
 3. Tapping **Done** (or tapping the same row again) exits editing,
    restoring the live current-turn view and zoom.
 
@@ -277,14 +279,10 @@ Throw
 ## Confirmed Decisions
 
 1. **Ending a game**: explicit **End Game** button records `endedAt`.
-2. **Zoom panel trigger**: while setting a Target, only taps on the
-   **full board** change which sector the zoom panel displays; zoom-panel
-   taps only refine the point. Once throwing starts, the zoom panel locks
-   to the Target's sector and never changes for the rest of the turn (or
-   subsequent turns) — full-board taps just log a Throw Result without
-   moving the zoom window. It only changes again if the user enters
-   editing for a past turn (see below), switching to that turn's sector
-   for the duration.
+2. **Single board panel, no rotation**: replaced the original two-panel
+   (full board + rotated zoom wedge) design — see "Board Zoom" above. The
+   crop is always a pure function of the current Target, never rotated,
+   and a Full Board toggle handles wild throws that land outside it.
 3. **Bounds**: a tap outside the board is a valid `Miss` throw (value 0),
    not ignored.
 4. **Auto-end turn**: a turn ends the instant its 3rd dart is logged —

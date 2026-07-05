@@ -9,39 +9,14 @@ export interface BoardMarker {
   label?: string;
 }
 
-export interface BoardOverlayLabel {
-  text: string;
-  x: number;
-  y: number;
-  maskX: number;
-  maskY: number;
-  maskWidth: number;
-  maskHeight: number;
-}
-
 interface BoardViewProps {
   viewBox: string;
-  rotationDeg: number;
   markers: BoardMarker[];
   onPick: (point: Point) => void;
   className?: string;
-  /**
-   * A number label rendered upright in fixed crop coordinates (outside the
-   * rotated board group), masking over the dartboard.svg's own number ring
-   * text — which would otherwise appear sideways/upside-down once the zoom
-   * panel rotates the board to orient the targeted sector up or down.
-   */
-  overlay?: BoardOverlayLabel | null;
 }
 
-export function BoardView({
-  viewBox,
-  rotationDeg,
-  markers,
-  onPick,
-  className,
-  overlay,
-}: BoardViewProps) {
+export function BoardView({ viewBox, markers, onPick, className }: BoardViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const groupRef = useRef<SVGGElement>(null);
 
@@ -69,51 +44,17 @@ export function BoardView({
       onPointerDown={handlePointerDown}
       style={{ touchAction: "none" }}
     >
-      {/* Image and markers share the same transform but are split into two
-          groups so the number-ring mask can sit between them: it must paint
-          over the image's own (possibly sideways/upside-down) number text,
-          but under the markers so a near-miss throw is never hidden by it. */}
-      <g ref={groupRef} transform={`rotate(${rotationDeg})`}>
+      <g ref={groupRef}>
         <image href="/dartboard.svg" x={-250} y={-250} width={500} height={500} />
-      </g>
-      {overlay && (
-        <g>
-          <rect
-            x={overlay.maskX}
-            y={overlay.maskY}
-            width={overlay.maskWidth}
-            height={overlay.maskHeight}
-            fill="#000000"
-          />
-          <text
-            x={overlay.x}
-            y={overlay.y}
-            fontSize={30}
-            fontWeight={700}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fill="#c0c0c0"
-          >
-            {overlay.text}
-          </text>
-        </g>
-      )}
-      <g transform={`rotate(${rotationDeg})`}>
         {markers.map((marker, i) => (
-          <MarkerShape key={i} marker={marker} rotationDeg={rotationDeg} />
+          <MarkerShape key={i} marker={marker} />
         ))}
       </g>
     </svg>
   );
 }
 
-function MarkerShape({
-  marker,
-  rotationDeg,
-}: {
-  marker: BoardMarker;
-  rotationDeg: number;
-}) {
+function MarkerShape({ marker }: { marker: BoardMarker }) {
   const { x, y } = marker.point;
 
   if (marker.kind === "target") {
@@ -137,7 +78,6 @@ function MarkerShape({
           fontWeight={700}
           textAnchor="middle"
           fill="#78350f"
-          transform={`rotate(${-rotationDeg}, ${x}, ${y})`}
           dy={-9}
         >
           {marker.label}
