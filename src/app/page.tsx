@@ -1,11 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { BoardView, type BoardMarker, type BoardOverlayLabel } from "@/components/BoardView";
 import { ThrowSlots } from "@/components/ThrowSlots";
 import { NewGameModal } from "@/components/NewGameModal";
 import { CricketResultsModal } from "@/components/CricketResultsModal";
-import { createGame, createTurn, addThrow, endGame } from "@/lib/db";
+import { CricketScoreboard } from "@/components/CricketScoreboard";
+import { FreePlayHistory, type FreePlayTurnSummary } from "@/components/FreePlayHistory";
+import {
+  createGame,
+  createTurn,
+  addThrow,
+  endGame,
+  getAllTurns,
+  getThrowsForTurn,
+} from "@/lib/db";
 import {
   RADII,
   sectorCenterAngleDeg,
@@ -14,7 +23,7 @@ import {
 } from "@/lib/dartboard";
 import {
   CRICKET_SEQUENCE,
-  cricketMarksForThrow,
+  cricketTallyForTurn,
   cricketTargetKey,
   cricketTargetPoint,
 } from "@/lib/cricket";
@@ -50,6 +59,29 @@ function computeZoomTarget(point: Point): ZoomTarget {
   const r = Math.hypot(point.x, point.y);
   if (r <= RADII.outerBullOuter) return { kind: "bull" };
   return { kind: "sector", index: sectorIndexForPoint(point.x, point.y) };
+}
+
+/** Highest tally ever recorded (across all past cricket games) for each target. */
+async function computeCricketBestTallies(): Promise<Record<string, number>> {
+  const allTurns = await getAllTurns();
+  const best: Record<string, number> = {};
+
+  for (const spec of CRICKET_SEQUENCE) {
+    const key = cricketTargetKey(spec);
+    const matchingTurns = allTurns.filter(
+      (t) => t.cricketTarget && cricketTargetKey(t.cricketTarget) === key
+    );
+
+    let max = 0;
+    for (const t of matchingTurns) {
+      const throws = await getThrowsForTurn(t.id);
+      const total = cricketTallyForTurn(throws, spec);
+      if (total > max) max = total;
+    }
+    best[key] = max;
+  }
+
+  return best;
 }
 
 interface ZoomInfo {
@@ -105,12 +137,19 @@ export default function Home() {
   const [confirmedTarget, setConfirmedTarget] = useState<Point | null>(null);
   const [currentThrows, setCurrentThrows] = useState<ThrowRecord[]>([]);
   const [editingThrowIndex, setEditingThrowIndex] = useState<number | null>(null);
+  // Tracks how many darts have been claimed for the current turn synchronously
+  // (unlike currentThrows.length, which only updates after a render commits),
+  // so two taps fired back-to-back can never both claim the same dart slot.
+  const nextThrowIndexRef = useRef(0);
 
   const [showNewGameModal, setShowNewGameModal] = useState(false);
   const [cricketVariant, setCricketVariant] = useState<CricketVariant | null>(null);
+  const [lastCricketVariant, setLastCricketVariant] = useState<CricketVariant | null>(null);
   const [cricketSequenceIndex, setCricketSequenceIndex] = useState(0);
-  const [cricketTallies, setCricketTallies] = useState<Record<string, number>>({});
-  const [cricketResults, setCricketResults] = useState<Record<string, number> | null>(null);
+  const [cricketTurnThrows, setCricketTurnThrows] = useState<Record<string, ThrowRecord[]>>({});
+  const [cricketResults, setCricketResults] = useState<Record<string, ThrowRecord[]> | null>(null);
+  const [cricketBest, setCricketBest] = useState<Record<string, number>>({});
+  const [freePlayHistory, setFreePlayHistory] = useState<FreePlayTurnSummary[]>([]);
 
   const zoomInfo = useMemo(() => computeZoomInfo(zoomTarget), [zoomTarget]);
 
@@ -122,9 +161,9 @@ export default function Home() {
     if (activeTargetPoint) {
       list.push({ point: activeTargetPoint, kind: "target" });
     }
-    for (const t of currentThrows) {
-      list.push({ point: t.position, kind: "throw", label: t.suffix });
-    }
+    currentThrows.forEach((t, i) => {
+      list.push({ point: t.position, kind: "throw", label: String(i + 1) });
+    });
     return list;
   }, [activeTargetPoint, currentThrows]);
 
@@ -134,11 +173,13 @@ export default function Home() {
     setTurnNumber(0);
     setCurrentThrows([]);
     setEditingThrowIndex(null);
+    nextThrowIndexRef.current = 0;
     setPendingTarget(null);
     setConfirmedTarget(null);
     setCricketVariant(null);
     setCricketSequenceIndex(0);
-    setCricketTallies({});
+    setCricketTurnThrows({});
+    setFreePlayHistory([]);
     setPhase("idle");
   }
 
@@ -149,8 +190,10 @@ export default function Home() {
     setTurnNumber(0);
     setCurrentThrows([]);
     setEditingThrowIndex(null);
+    nextThrowIndexRef.current = 0;
     setPendingTarget(null);
     setConfirmedTarget(null);
+    setFreePlayHistory([]);
     setShowNewGameModal(false);
     setPhase("setting-target");
   }
@@ -163,14 +206,16 @@ export default function Home() {
 
     setGame(newGame);
     setCricketVariant(variant);
+    setLastCricketVariant(variant);
     setCricketSequenceIndex(0);
-    setCricketTallies({});
+    setCricketTurnThrows({});
     setTurn(newTurn);
     setTurnNumber(1);
     setConfirmedTarget(targetPoint);
     setPendingTarget(null);
     setCurrentThrows([]);
     setEditingThrowIndex(null);
+    nextThrowIndexRef.current = 0;
     setZoomTarget(computeZoomTarget(targetPoint));
     setShowNewGameModal(false);
     setPhase("throwing");
@@ -211,8 +256,10 @@ export default function Home() {
       return;
     }
 
-    if (currentThrows.length >= 3) return;
-    const suffix = THROW_SUFFIXES[currentThrows.length];
+    if (nextThrowIndexRef.current >= 3) return;
+    const index = nextThrowIndexRef.current;
+    nextThrowIndexRef.current += 1;
+    const suffix = THROW_SUFFIXES[index];
     const throwRecord = await addThrow(turn, suffix, point);
     setCurrentThrows((prev) => [...prev, throwRecord]);
   }
@@ -232,6 +279,7 @@ export default function Home() {
     setPendingTarget(null);
     setCurrentThrows([]);
     setEditingThrowIndex(null);
+    nextThrowIndexRef.current = 0;
     setPhase("throwing");
   }
 
@@ -244,12 +292,17 @@ export default function Home() {
     }
 
     if (!confirmedTarget) return;
+    setFreePlayHistory((prev) =>
+      [{ target: confirmedTarget, throws: currentThrows }, ...prev].slice(0, 5)
+    );
+
     const nextTurnNumber = turnNumber + 1;
     const newTurn = await createTurn(game.id, nextTurnNumber, confirmedTarget);
     setTurn(newTurn);
     setTurnNumber(nextTurnNumber);
     setCurrentThrows([]);
     setEditingThrowIndex(null);
+    nextThrowIndexRef.current = 0;
   }
 
   async function handleEndCricketTurn(activeGame: Game) {
@@ -257,17 +310,15 @@ export default function Home() {
     if (!variant) return;
 
     const spec = CRICKET_SEQUENCE[cricketSequenceIndex];
-    const marksThisTurn = currentThrows.reduce(
-      (sum, t) => sum + cricketMarksForThrow(t.score, spec),
-      0
-    );
-    const updatedTallies = { ...cricketTallies, [cricketTargetKey(spec)]: marksThisTurn };
-    setCricketTallies(updatedTallies);
+    const updatedThrows = { ...cricketTurnThrows, [cricketTargetKey(spec)]: currentThrows };
+    setCricketTurnThrows(updatedThrows);
 
     const nextIndex = cricketSequenceIndex + 1;
     if (nextIndex >= CRICKET_SEQUENCE.length) {
       await endGame(activeGame.id);
-      setCricketResults(updatedTallies);
+      const best = await computeCricketBestTallies();
+      setCricketBest(best);
+      setCricketResults(updatedThrows);
       resetSessionState();
       return;
     }
@@ -283,6 +334,7 @@ export default function Home() {
     setConfirmedTarget(nextTargetPoint);
     setCurrentThrows([]);
     setEditingThrowIndex(null);
+    nextThrowIndexRef.current = 0;
     setZoomTarget(computeZoomTarget(nextTargetPoint));
   }
 
@@ -303,6 +355,12 @@ export default function Home() {
   function openNewGameModal() {
     setCricketResults(null);
     setShowNewGameModal(true);
+  }
+
+  async function handleRestartCricketGame() {
+    setCricketResults(null);
+    if (!lastCricketVariant) return;
+    await handleStartCricket(lastCricketVariant);
   }
 
   const canConfirmTarget = phase === "setting-target" && pendingTarget !== null;
@@ -349,16 +407,22 @@ export default function Home() {
             className="h-full max-h-[70vh] w-auto"
           />
         </div>
-        <ThrowSlots
-          throws={currentThrows}
-          editable={canEndTurn}
-          editingIndex={editingThrowIndex}
-          onSlotClick={handleSlotClick}
-          canEndTurn={canEndTurn}
-          onEndTurn={handleEndTurn}
-          canConfirmTarget={canConfirmTarget}
-          onConfirmTarget={handleConfirmTarget}
-        />
+        <div className="flex w-56 flex-col gap-4 overflow-y-auto">
+          <ThrowSlots
+            throws={currentThrows}
+            editable={canEndTurn}
+            editingIndex={editingThrowIndex}
+            onSlotClick={handleSlotClick}
+            canEndTurn={canEndTurn}
+            onEndTurn={handleEndTurn}
+            canConfirmTarget={canConfirmTarget}
+            onConfirmTarget={handleConfirmTarget}
+          />
+          {game?.mode === "cricket-practice" && (
+            <CricketScoreboard throwsByTarget={cricketTurnThrows} />
+          )}
+          {game?.mode === "free-play" && <FreePlayHistory history={freePlayHistory} />}
+        </div>
       </main>
 
       <footer className="flex gap-2 border-t border-zinc-800 px-6 py-4">
@@ -378,7 +442,12 @@ export default function Home() {
       )}
 
       {cricketResults && (
-        <CricketResultsModal tallies={cricketResults} onNewGame={openNewGameModal} />
+        <CricketResultsModal
+          throwsByTarget={cricketResults}
+          best={cricketBest}
+          onRestartGame={handleRestartCricketGame}
+          onChangeGameType={openNewGameModal}
+        />
       )}
     </div>
   );

@@ -103,3 +103,13 @@ export async function addThrow(
   await db.put("throws", throwRecord);
   return throwRecord;
 }
+
+export async function getAllTurns(): Promise<Turn[]> {
+  const db = await getDb();
+  return db.getAll("turns");
+}
+
+export async function getThrowsForTurn(turnId: string): Promise<ThrowRecord[]> {
+  const db = await getDb();
+  return db.getAllFromIndex("throws", "turnId", turnId);
+}

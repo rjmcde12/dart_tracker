@@ -1,5 +1,11 @@
 import { RADII, sectorCenterAngleDeg, sectorIndexForNumber } from "./dartboard";
-import type { CricketTargetSpec, CricketVariant, Point, ScoreResult } from "./types";
+import type {
+  CricketTargetSpec,
+  CricketVariant,
+  Point,
+  ScoreResult,
+  ThrowRecord,
+} from "./types";
 
 /** Cricket Practice targets numbers 20 down to 15, then the bull, one turn each. */
 export const CRICKET_NUMBERS = [20, 19, 18, 17, 16, 15];
@@ -61,4 +67,9 @@ export function cricketMarksForThrow(score: ScoreResult, spec: CricketTargetSpec
     default:
       return 0;
   }
+}
+
+/** Total marks across a turn's throws (usually 3) against a given target. */
+export function cricketTallyForTurn(throws: ThrowRecord[], spec: CricketTargetSpec): number {
+  return throws.reduce((sum, t) => sum + cricketMarksForThrow(t.score, spec), 0);
 }

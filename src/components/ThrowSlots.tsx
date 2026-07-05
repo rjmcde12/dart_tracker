@@ -47,7 +47,7 @@ export function ThrowSlots({
             } ${clickable ? "cursor-pointer hover:border-blue-500" : "cursor-default"}`}
           >
             <span className="text-xs font-semibold text-yellow-400">
-              Dart {suffix.toUpperCase()}
+              Dart {index + 1}
             </span>
             {t ? (
               <span className="text-sm text-zinc-100">

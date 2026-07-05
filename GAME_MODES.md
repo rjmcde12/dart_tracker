@@ -15,15 +15,37 @@ Target variant).
 The original/default mode — open-ended practice with no fixed sequence.
 
 - User manually sets every Target by tapping the board (Set Target →
-  Confirm Target, see CLAUDE.md Core Workflow).
+  Confirm Target, see CLAUDE.md Core Workflow). The **Confirm Target**
+  button lives in the Throw Slots panel, in the same spot **End Turn**
+  later occupies.
 - Target persists across turns until **Move Target** is tapped.
 - No automatic end condition — the session runs until **End Game** is
   tapped manually.
-- No results modal; progress is only reflected live in the Throw Slots
-  panel and (in a future iteration) a history view.
+- No results modal; a full history view is a future iteration, but see
+  "Recent Turns panel" below for what's shown live during the session.
 
 `Game.mode = "free-play"`, `Game.cricketVariant = null`, and every
 `Turn.cricketTarget = null`.
+
+### Recent Turns panel
+
+Below the Throw Slots, Free Play shows the **last 5 completed turns**
+(most recent on top), each row:
+
+- **Target label** — the Target's dartboard number (or "Bull"), ignoring
+  which ring it's in: a Target placed anywhere in the "20" wedge (single,
+  treble, wherever) is just labeled "20" for now. Computed by
+  `nearestNumberOrBullLabel` (`src/lib/dartboard.ts`). Once richer
+  historical tracking is added, this can be refined to the specific
+  region (e.g. "T20" vs "single outer 20").
+- **Per-dart results** — each of the 3 throws' score label (e.g. `T20`,
+  `S17`, `Miss`), reusing the same labels already shown live in the Throw
+  Slots panel.
+- **Turn total** — sum of the 3 throws' point values.
+
+This is `FreePlayHistory` (`src/components/FreePlayHistory.tsx`), backed
+by an in-memory list capped at 5 entries — it isn't a DB query, just the
+last few turns kept in React state for the current session.
 
 ## Cricket Practice
 
@@ -95,29 +117,56 @@ Example: a turn's 3 darts land on single-20, treble-20, and a miss →
 1 + 3 + 0 = **4 tallies** for 20. Implemented in `cricketMarksForThrow`
 (`src/lib/cricket.ts`).
 
+### Live scoreboard
+
+Below the Throw Slots, Cricket Practice shows a running **Game Results**
+panel — every target in the sequence (20, 19, 18, 17, 16, 15, Bull), each
+as a row of the target label + 3 per-dart result circles + a running
+total. It's the same row layout as the end-of-game results modal (see
+below), minus the Best column. A target whose turn hasn't happened yet
+shows 3 empty, dimmed placeholder circles and a `–` instead of a total —
+it updates to real marks only once that turn's End Turn is tapped (the
+turn currently being thrown stays in its "not yet played" state here
+even though its darts are already visible above in the Throw Slots).
+
+Each per-dart circle (`CricketThrowMark` component) shows that single
+throw's result against the target:
+
+- **Miss** (wrong number, or a true miss) → a red dash
+- **Single** → a green backslash
+- **Double** → a green X
+- **Treble** → a green circle
+- **Not thrown yet** → an empty, dimmed circle (no mark)
+
 ### Results modal
 
-Once the Bull turn ends, a modal shows the tally count for each of 20,
-19, 18, 17, 16, 15, and Bull, rendered in classic cricket-scorecard marks
-(`CricketTallyMark` component):
+Once the Bull turn ends, a modal shows the same per-target rows as the
+live scoreboard, plus a **Best** column — the highest tally ever recorded
+for that target across *all* past Cricket Practice games (queried from
+IndexedDB via `getAllTurns`/`getThrowsForTurn`, filtered by matching
+`cricketTarget`, computed with `cricketTallyForTurn`; see
+`computeCricketBestTallies` in `page.tsx`). Best is computed once, right
+after the game ends, and includes the just-finished game's own turns.
 
-1. 1st mark → one diagonal slash
-2. 2nd mark → the other diagonal, completing an X
-3. 3rd mark → a circle around the X ("closed")
-4. 4th+ marks → plain tally lines added to the right of the circled X
+Two buttons at the bottom:
 
-A **New Game** button at the bottom of the results modal re-opens the
-New Game mode picker.
+- **Restart Game** — immediately starts a new Cricket Practice game with
+  the same Target variant (Single/Triple), skipping the New Game modal
+  entirely.
+- **Change Game Type** — re-opens the New Game modal (mode picker), same
+  as tapping the header's New Game button.
 
 ### Data model notes
 
 - `Game.mode = "cricket-practice"`, `Game.cricketVariant = "single" | "triple"`.
 - `Turn.cricketTarget = { kind: "number", number: 20 }` (etc.) or
-  `{ kind: "bull" }` — records which sequence step a turn was for, so
-  tallies could be recomputed later from raw Throw data if needed.
-- Tallies themselves are computed in memory during play and shown in the
-  results modal; they aren't written as a separate DB record (the raw
-  Turn/Throw data plus `cricketTarget` is enough to derive them again).
+  `{ kind: "bull" }` — records which sequence step a turn was for. This is
+  what makes the Best-ever lookup possible: it's how a past Turn is
+  matched back to "which target was this for" without re-deriving it from
+  the Turn's raw `target` coordinates.
+- Tallies themselves (both the live scoreboard's and the results modal's
+  Total column) are computed on the fly from each turn's raw Throw data
+  via `cricketTallyForTurn`; they aren't written as a separate DB record.
 
 ## Adding a new mode
 

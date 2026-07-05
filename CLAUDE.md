@@ -80,7 +80,7 @@ Three panels side by side, landscape:
    rotated. If the Target is in/near the bullseye instead of a numbered
    wedge, this panel instead shows a square crop centered on the bull,
    reaching out to just inside the treble ring (no single wedge applies).
-3. **Right — Throw Slots**: three slots (Dart A / B / C) for the current
+3. **Right — Throw Slots**: three slots (Dart 1 / 2 / 3) for the current
    turn. See "Throw Slots & Editing" below.
 
 ### Zoom Orientation
@@ -170,8 +170,10 @@ where a Target can be set.
 
 ## Throw Slots & Editing
 
-Three slots (labeled Dart A / B / C, matching the throw ID suffixes) sit
-to the right of the two board panels, for the current turn only:
+Three slots (labeled Dart 1 / 2 / 3, one per dart of the turn — the
+underlying Throw record IDs still use the `a`/`b`/`c` suffix from the Data
+Model below) sit to the right of the two board panels, for the current
+turn only:
 
 - Empty before that dart is thrown ("Not thrown").
 - Populated live as each throw is logged, showing its score label/value

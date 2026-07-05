@@ -96,3 +96,16 @@ export function pointToScore(x: number, y: number): ScoreResult {
 export function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
+
+/**
+ * A point's dartboard number, ignoring which ring it's in (so a Free Play
+ * Target set anywhere in the "20" wedge — single, treble, whatever — is
+ * just "20"), or "Bull" if it's within the outer bull radius. A coarser,
+ * display-only sibling of `pointToScore`; see CLAUDE.md for why Free Play
+ * only tracks the plain number for now.
+ */
+export function nearestNumberOrBullLabel(point: Point): string {
+  const r = Math.hypot(point.x, point.y);
+  if (r <= RADII.outerBullOuter) return "Bull";
+  return String(sectorNumberForIndex(sectorIndexForPoint(point.x, point.y)));
+}
