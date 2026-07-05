@@ -17,6 +17,7 @@ import {
 } from "@/lib/db";
 import {
   RADII,
+  nearestNumberOrBullLabel,
   sectorCenterAngleDeg,
   sectorIndexForPoint,
   sectorNumberForIndex,
@@ -25,6 +26,7 @@ import {
   CRICKET_SEQUENCE,
   cricketTallyForTurn,
   cricketTargetKey,
+  cricketTargetLabel,
   cricketTargetPoint,
 } from "@/lib/cricket";
 import type {
@@ -54,6 +56,13 @@ const THROW_SUFFIXES: ThrowSuffix[] = ["a", "b", "c"];
 type Phase = "idle" | "setting-target" | "throwing";
 
 type ZoomTarget = { kind: "sector"; index: number } | { kind: "bull" };
+
+interface EditingPastTurn {
+  label: string;
+  turn: Turn;
+  throws: ThrowRecord[];
+  onUpdate: (throws: ThrowRecord[]) => void;
+}
 
 function computeZoomTarget(point: Point): ZoomTarget {
   const r = Math.hypot(point.x, point.y);
@@ -136,50 +145,69 @@ export default function Home() {
   const [pendingTarget, setPendingTarget] = useState<Point | null>(null);
   const [confirmedTarget, setConfirmedTarget] = useState<Point | null>(null);
   const [currentThrows, setCurrentThrows] = useState<ThrowRecord[]>([]);
-  const [editingThrowIndex, setEditingThrowIndex] = useState<number | null>(null);
   // Tracks how many darts have been claimed for the current turn synchronously
   // (unlike currentThrows.length, which only updates after a render commits),
   // so two taps fired back-to-back can never both claim the same dart slot.
   const nextThrowIndexRef = useRef(0);
+  const currentThrowsRef = useRef<ThrowRecord[]>([]);
 
   const [showNewGameModal, setShowNewGameModal] = useState(false);
   const [cricketVariant, setCricketVariant] = useState<CricketVariant | null>(null);
   const [lastCricketVariant, setLastCricketVariant] = useState<CricketVariant | null>(null);
   const [cricketSequenceIndex, setCricketSequenceIndex] = useState(0);
-  const [cricketTurnThrows, setCricketTurnThrows] = useState<Record<string, ThrowRecord[]>>({});
+  const [cricketTurns, setCricketTurns] = useState<Record<string, { turn: Turn; throws: ThrowRecord[] }>>({});
   const [cricketResults, setCricketResults] = useState<Record<string, ThrowRecord[]> | null>(null);
   const [cricketBest, setCricketBest] = useState<Record<string, number>>({});
   const [freePlayHistory, setFreePlayHistory] = useState<FreePlayTurnSummary[]>([]);
 
+  // Editing a past (already-ended) turn, entered by tapping its row in the
+  // Cricket scoreboard / Free Play history panel — see "Editing a past turn".
+  const [editingPastTurn, setEditingPastTurn] = useState<EditingPastTurn | null>(null);
+  const [editingThrowIndex, setEditingThrowIndex] = useState<number | null>(null);
+
   const zoomInfo = useMemo(() => computeZoomInfo(zoomTarget), [zoomTarget]);
 
-  const activeTargetPoint =
-    phase === "setting-target" ? pendingTarget : confirmedTarget;
+  const displayedTarget = editingPastTurn
+    ? editingPastTurn.turn.target
+    : phase === "setting-target"
+      ? pendingTarget
+      : confirmedTarget;
+  const displayedThrows = editingPastTurn ? editingPastTurn.throws : currentThrows;
 
   const markers: BoardMarker[] = useMemo(() => {
     const list: BoardMarker[] = [];
-    if (activeTargetPoint) {
-      list.push({ point: activeTargetPoint, kind: "target" });
+    if (displayedTarget) {
+      list.push({ point: displayedTarget, kind: "target" });
     }
-    currentThrows.forEach((t, i) => {
+    displayedThrows.forEach((t, i) => {
       list.push({ point: t.position, kind: "throw", label: String(i + 1) });
     });
     return list;
-  }, [activeTargetPoint, currentThrows]);
+  }, [displayedTarget, displayedThrows]);
+
+  const cricketThrowsByTarget = useMemo(() => {
+    const result: Record<string, ThrowRecord[]> = {};
+    for (const [key, record] of Object.entries(cricketTurns)) {
+      result[key] = record.throws;
+    }
+    return result;
+  }, [cricketTurns]);
 
   function resetSessionState() {
     setGame(null);
     setTurn(null);
     setTurnNumber(0);
     setCurrentThrows([]);
-    setEditingThrowIndex(null);
+    currentThrowsRef.current = [];
     nextThrowIndexRef.current = 0;
     setPendingTarget(null);
     setConfirmedTarget(null);
     setCricketVariant(null);
     setCricketSequenceIndex(0);
-    setCricketTurnThrows({});
+    setCricketTurns({});
     setFreePlayHistory([]);
+    setEditingPastTurn(null);
+    setEditingThrowIndex(null);
     setPhase("idle");
   }
 
@@ -189,11 +217,13 @@ export default function Home() {
     setTurn(null);
     setTurnNumber(0);
     setCurrentThrows([]);
-    setEditingThrowIndex(null);
+    currentThrowsRef.current = [];
     nextThrowIndexRef.current = 0;
     setPendingTarget(null);
     setConfirmedTarget(null);
     setFreePlayHistory([]);
+    setEditingPastTurn(null);
+    setEditingThrowIndex(null);
     setShowNewGameModal(false);
     setPhase("setting-target");
   }
@@ -208,14 +238,16 @@ export default function Home() {
     setCricketVariant(variant);
     setLastCricketVariant(variant);
     setCricketSequenceIndex(0);
-    setCricketTurnThrows({});
+    setCricketTurns({});
     setTurn(newTurn);
     setTurnNumber(1);
     setConfirmedTarget(targetPoint);
     setPendingTarget(null);
     setCurrentThrows([]);
-    setEditingThrowIndex(null);
+    currentThrowsRef.current = [];
     nextThrowIndexRef.current = 0;
+    setEditingPastTurn(null);
+    setEditingThrowIndex(null);
     setZoomTarget(computeZoomTarget(targetPoint));
     setShowNewGameModal(false);
     setPhase("throwing");
@@ -225,7 +257,7 @@ export default function Home() {
     // The zoom panel only re-centers while choosing/refining a Target.
     // Once throwing has started it stays locked on the Target's sector —
     // see CLAUDE.md "Zoom behavior while throwing".
-    if (phase === "setting-target") {
+    if (phase === "setting-target" && !editingPastTurn) {
       setZoomTarget(computeZoomTarget(point));
     }
     handlePick(point);
@@ -236,6 +268,10 @@ export default function Home() {
   }
 
   function handlePick(point: Point) {
+    if (editingPastTurn) {
+      void handlePastTurnEditTap(point);
+      return;
+    }
     if (phase === "setting-target") {
       setPendingTarget(point);
     } else if (phase === "throwing") {
@@ -243,29 +279,37 @@ export default function Home() {
     }
   }
 
+  async function handlePastTurnEditTap(point: Point) {
+    if (!editingPastTurn || editingThrowIndex === null) return;
+    const suffix = THROW_SUFFIXES[editingThrowIndex];
+    const updated = await addThrow(editingPastTurn.turn, suffix, point);
+    const newThrows = editingPastTurn.throws.map((t, i) =>
+      i === editingThrowIndex ? updated : t
+    );
+    editingPastTurn.onUpdate(newThrows);
+    setEditingPastTurn((prev) => (prev ? { ...prev, throws: newThrows } : prev));
+    setEditingThrowIndex(null);
+  }
+
   async function logOrUpdateThrow(point: Point) {
-    if (!turn) return;
-
-    if (editingThrowIndex !== null) {
-      const suffix = THROW_SUFFIXES[editingThrowIndex];
-      const updated = await addThrow(turn, suffix, point);
-      setCurrentThrows((prev) =>
-        prev.map((t, i) => (i === editingThrowIndex ? updated : t))
-      );
-      setEditingThrowIndex(null);
-      return;
-    }
-
+    if (!turn || !game) return;
     if (nextThrowIndexRef.current >= 3) return;
+
     const index = nextThrowIndexRef.current;
     nextThrowIndexRef.current += 1;
     const suffix = THROW_SUFFIXES[index];
     const throwRecord = await addThrow(turn, suffix, point);
-    setCurrentThrows((prev) => [...prev, throwRecord]);
+    const updatedThrows = [...currentThrowsRef.current, throwRecord];
+    currentThrowsRef.current = updatedThrows;
+    setCurrentThrows(updatedThrows);
+
+    if (updatedThrows.length === 3) {
+      await autoEndTurn(game, turn, updatedThrows);
+    }
   }
 
   function handleSlotClick(index: number) {
-    if (currentThrows.length !== 3) return;
+    if (!editingPastTurn) return;
     setEditingThrowIndex((prev) => (prev === index ? null : index));
   }
 
@@ -278,47 +322,54 @@ export default function Home() {
     setConfirmedTarget(pendingTarget);
     setPendingTarget(null);
     setCurrentThrows([]);
-    setEditingThrowIndex(null);
+    currentThrowsRef.current = [];
     nextThrowIndexRef.current = 0;
     setPhase("throwing");
   }
 
-  async function handleEndTurn() {
-    if (!game) return;
-
-    if (game.mode === "cricket-practice") {
-      await handleEndCricketTurn(game);
+  /** Fires the moment a turn's 3rd dart is logged — no manual End Turn anymore. */
+  async function autoEndTurn(activeGame: Game, finishedTurn: Turn, finishedThrows: ThrowRecord[]) {
+    if (activeGame.mode === "cricket-practice") {
+      await autoEndCricketTurn(activeGame, finishedTurn, finishedThrows);
       return;
     }
 
     if (!confirmedTarget) return;
     setFreePlayHistory((prev) =>
-      [{ target: confirmedTarget, throws: currentThrows }, ...prev].slice(0, 5)
+      [{ turn: finishedTurn, throws: finishedThrows }, ...prev].slice(0, 5)
     );
 
     const nextTurnNumber = turnNumber + 1;
-    const newTurn = await createTurn(game.id, nextTurnNumber, confirmedTarget);
+    const newTurn = await createTurn(activeGame.id, nextTurnNumber, confirmedTarget);
     setTurn(newTurn);
     setTurnNumber(nextTurnNumber);
     setCurrentThrows([]);
-    setEditingThrowIndex(null);
+    currentThrowsRef.current = [];
     nextThrowIndexRef.current = 0;
   }
 
-  async function handleEndCricketTurn(activeGame: Game) {
+  async function autoEndCricketTurn(activeGame: Game, finishedTurn: Turn, finishedThrows: ThrowRecord[]) {
     const variant = cricketVariant;
     if (!variant) return;
 
     const spec = CRICKET_SEQUENCE[cricketSequenceIndex];
-    const updatedThrows = { ...cricketTurnThrows, [cricketTargetKey(spec)]: currentThrows };
-    setCricketTurnThrows(updatedThrows);
+    const key = cricketTargetKey(spec);
+    const updatedCricketTurns = {
+      ...cricketTurns,
+      [key]: { turn: finishedTurn, throws: finishedThrows },
+    };
+    setCricketTurns(updatedCricketTurns);
 
     const nextIndex = cricketSequenceIndex + 1;
     if (nextIndex >= CRICKET_SEQUENCE.length) {
       await endGame(activeGame.id);
       const best = await computeCricketBestTallies();
       setCricketBest(best);
-      setCricketResults(updatedThrows);
+      const throwsOnly: Record<string, ThrowRecord[]> = {};
+      for (const [k, record] of Object.entries(updatedCricketTurns)) {
+        throwsOnly[k] = record.throws;
+      }
+      setCricketResults(throwsOnly);
       resetSessionState();
       return;
     }
@@ -333,7 +384,7 @@ export default function Home() {
     setTurnNumber(nextTurnNumber);
     setConfirmedTarget(nextTargetPoint);
     setCurrentThrows([]);
-    setEditingThrowIndex(null);
+    currentThrowsRef.current = [];
     nextThrowIndexRef.current = 0;
     setZoomTarget(computeZoomTarget(nextTargetPoint));
   }
@@ -342,7 +393,6 @@ export default function Home() {
     setPendingTarget(confirmedTarget);
     setConfirmedTarget(null);
     setTurn(null);
-    setEditingThrowIndex(null);
     setPhase("setting-target");
   }
 
@@ -363,10 +413,61 @@ export default function Home() {
     await handleStartCricket(lastCricketVariant);
   }
 
-  const canConfirmTarget = phase === "setting-target" && pendingTarget !== null;
+  function handleDoneEditing() {
+    setEditingPastTurn(null);
+    setEditingThrowIndex(null);
+    if (confirmedTarget) setZoomTarget(computeZoomTarget(confirmedTarget));
+  }
+
+  function handleEditCricketRow(key: string) {
+    const record = cricketTurns[key];
+    if (!record) return;
+    if (editingPastTurn?.turn.id === record.turn.id) {
+      handleDoneEditing();
+      return;
+    }
+    const spec = CRICKET_SEQUENCE.find((s) => cricketTargetKey(s) === key);
+    setEditingPastTurn({
+      label: spec ? cricketTargetLabel(spec) : key,
+      turn: record.turn,
+      throws: record.throws,
+      onUpdate: (throws) =>
+        setCricketTurns((prev) => ({ ...prev, [key]: { turn: record.turn, throws } })),
+    });
+    setEditingThrowIndex(null);
+    setZoomTarget(computeZoomTarget(record.turn.target));
+  }
+
+  function handleEditFreePlayRow(index: number) {
+    const record = freePlayHistory[index];
+    if (!record) return;
+    if (editingPastTurn?.turn.id === record.turn.id) {
+      handleDoneEditing();
+      return;
+    }
+    setEditingPastTurn({
+      label: nearestNumberOrBullLabel(record.turn.target),
+      turn: record.turn,
+      throws: record.throws,
+      onUpdate: (throws) =>
+        setFreePlayHistory((prev) => prev.map((r, i) => (i === index ? { ...r, throws } : r))),
+    });
+    setEditingThrowIndex(null);
+    setZoomTarget(computeZoomTarget(record.turn.target));
+  }
+
+  const canConfirmTarget = phase === "setting-target" && pendingTarget !== null && !editingPastTurn;
   const canMoveTarget =
-    phase === "throwing" && currentThrows.length === 0 && game?.mode !== "cricket-practice";
-  const canEndTurn = phase === "throwing" && currentThrows.length === 3;
+    phase === "throwing" &&
+    currentThrows.length === 0 &&
+    game?.mode !== "cricket-practice" &&
+    !editingPastTurn;
+
+  const editingCricketKey =
+    editingPastTurn?.turn.cricketTarget
+      ? cricketTargetKey(editingPastTurn.turn.cricketTarget)
+      : null;
+  const editingFreePlayTurnId = editingPastTurn?.turn.id ?? null;
 
   return (
     <div className="flex h-screen w-screen flex-col bg-zinc-950 text-zinc-100">
@@ -374,7 +475,7 @@ export default function Home() {
         <div>
           <h1 className="text-lg font-semibold">Dart Practice Tracker</h1>
           <p className="text-sm text-zinc-400">
-            {statusLine(phase, turnNumber, currentThrows.length, game, cricketSequenceIndex)}
+            {statusLine(phase, turnNumber, currentThrows.length, game, cricketSequenceIndex, editingPastTurn)}
           </p>
         </div>
         <div className="flex gap-2">
@@ -409,19 +510,30 @@ export default function Home() {
         </div>
         <div className="flex w-56 flex-col gap-4 overflow-y-auto">
           <ThrowSlots
-            throws={currentThrows}
-            editable={canEndTurn}
+            throws={displayedThrows}
+            editable={!!editingPastTurn}
             editingIndex={editingThrowIndex}
             onSlotClick={handleSlotClick}
-            canEndTurn={canEndTurn}
-            onEndTurn={handleEndTurn}
             canConfirmTarget={canConfirmTarget}
             onConfirmTarget={handleConfirmTarget}
+            isEditingPastTurn={!!editingPastTurn}
+            editingLabel={editingPastTurn?.label}
+            onDoneEditing={handleDoneEditing}
           />
           {game?.mode === "cricket-practice" && (
-            <CricketScoreboard throwsByTarget={cricketTurnThrows} />
+            <CricketScoreboard
+              throwsByTarget={cricketThrowsByTarget}
+              editingKey={editingCricketKey}
+              onRowClick={handleEditCricketRow}
+            />
           )}
-          {game?.mode === "free-play" && <FreePlayHistory history={freePlayHistory} />}
+          {game?.mode === "free-play" && (
+            <FreePlayHistory
+              history={freePlayHistory}
+              editingTurnId={editingFreePlayTurnId}
+              onRowClick={handleEditFreePlayRow}
+            />
+          )}
         </div>
       </main>
 
@@ -458,8 +570,10 @@ function statusLine(
   turnNumber: number,
   throwsLogged: number,
   game: Game | null,
-  cricketSequenceIndex: number
+  cricketSequenceIndex: number,
+  editingPastTurn: EditingPastTurn | null
 ) {
+  if (editingPastTurn) return `Editing ${editingPastTurn.label} — tap a dart slot, then a board.`;
   if (phase === "idle") return "Tap New Game to begin a practice session.";
   if (game?.mode === "cricket-practice") {
     const spec = CRICKET_SEQUENCE[cricketSequenceIndex];

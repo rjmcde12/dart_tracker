@@ -10,14 +10,24 @@ interface CricketTargetRowProps {
   throws: ThrowRecord[] | undefined;
   /** Pass to render a trailing "Best ever" column; omit to leave it out. */
   best?: number;
+  /** Highlights the row as the one currently open for editing. */
+  isEditing?: boolean;
+  /** Pass to make a played row clickable (enters/exits editing that turn). */
+  onClick?: () => void;
 }
 
-export function CricketTargetRow({ spec, throws, best }: CricketTargetRowProps) {
+export function CricketTargetRow({
+  spec,
+  throws,
+  best,
+  isEditing,
+  onClick,
+}: CricketTargetRowProps) {
   const played = throws !== undefined;
   const total = played ? cricketTallyForTurn(throws, spec) : null;
 
-  return (
-    <div className="flex items-center gap-3 border-b border-zinc-800 pb-2">
+  const rowContent = (
+    <>
       <span className="w-10 text-sm font-semibold text-zinc-300">
         {cricketTargetLabel(spec)}
       </span>
@@ -35,6 +45,22 @@ export function CricketTargetRow({ spec, throws, best }: CricketTargetRowProps) 
       {best !== undefined && (
         <span className="w-12 text-right text-sm text-zinc-400">{best}</span>
       )}
-    </div>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`flex w-full items-center gap-3 border-b pb-2 text-left transition-colors ${
+          isEditing ? "border-blue-500" : "border-zinc-800 hover:border-zinc-600"
+        }`}
+      >
+        {rowContent}
+      </button>
+    );
+  }
+
+  return <div className="flex items-center gap-3 border-b border-zinc-800 pb-2">{rowContent}</div>;
 }

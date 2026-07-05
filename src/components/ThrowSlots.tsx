@@ -9,10 +9,11 @@ interface ThrowSlotsProps {
   editable: boolean;
   editingIndex: number | null;
   onSlotClick: (index: number) => void;
-  canEndTurn: boolean;
-  onEndTurn: () => void;
   canConfirmTarget: boolean;
   onConfirmTarget: () => void;
+  isEditingPastTurn: boolean;
+  editingLabel?: string;
+  onDoneEditing: () => void;
 }
 
 export function ThrowSlots({
@@ -20,15 +21,22 @@ export function ThrowSlots({
   editable,
   editingIndex,
   onSlotClick,
-  canEndTurn,
-  onEndTurn,
   canConfirmTarget,
   onConfirmTarget,
+  isEditingPastTurn,
+  editingLabel,
+  onDoneEditing,
 }: ThrowSlotsProps) {
   const total = throws.reduce((sum, t) => sum + t.score.value, 0);
 
   return (
     <div className="flex w-56 flex-col gap-3 rounded-lg bg-zinc-900 p-4">
+      {isEditingPastTurn && (
+        <div className="text-xs font-semibold text-blue-400">
+          Editing {editingLabel}
+        </div>
+      )}
+
       {SUFFIXES.map((suffix, index) => {
         const t = throws[index];
         const isEditing = editingIndex === index;
@@ -79,13 +87,13 @@ export function ThrowSlots({
         </button>
       )}
 
-      {canEndTurn && (
+      {isEditingPastTurn && (
         <button
           type="button"
-          onClick={onEndTurn}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
+          onClick={onDoneEditing}
+          className="rounded-md bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600"
         >
-          End Turn?
+          Done
         </button>
       )}
     </div>

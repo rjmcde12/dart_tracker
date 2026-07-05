@@ -125,8 +125,11 @@ because that would flip bottom-half sector numbers upside-down. Instead:
   on the full board a Throw Result is tapped. A wild throw that lands in
   a different sector is only visible on the full board; a throw that
   lands close to the Target is visible (and more precisely taggable) in
-  the zoom panel. This stays true even while adjusting/re-tapping an
-  already-logged throw (see Throw Slots below).
+  the zoom panel.
+- **While editing a past turn** (see Throw Slots & Editing below): the
+  zoom panel switches to that turn's own Target sector for the duration
+  of the edit, so its darts can be retargeted precisely, then switches
+  back to the live current turn's sector once editing is done.
 
 ## Core Workflow
 
@@ -149,12 +152,12 @@ because that would flip bottom-half sector numbers upside-down. Instead:
 4. **Log Throws** — user throws 3 real darts, then taps where each landed
    (on either panel, in any order) — 3 Throw Result points collected per
    turn, populating the Throw Slots on the right as they're logged.
-5. **End Turn** — appears once 3 Throw Results are logged for the current
-   turn. Before tapping it, any of the 3 logged throws can be adjusted
-   via its Throw Slot (see below). Tapping End Turn saves the turn, clears
-   the 3 Throw Results/slots, and either starts a new turn with the same
-   Target (Free Play) or auto-advances to the mode's next Target (Cricket
-   Practice — see GAME_MODES.md), possibly ending the game.
+5. **Turn ends automatically** — the instant the 3rd dart is logged (no
+   button to tap), the turn is saved and the app either starts a new turn
+   with the same Target (Free Play) or auto-advances to the mode's next
+   Target (Cricket Practice — see GAME_MODES.md), possibly ending the
+   game. If a mistake needs fixing, see "Editing a past turn" below —
+   there's no window to catch it before it advances.
 6. **Move Target** — *(Free Play only)*. Available any time between
    turns. Re-enters the Set Target flow (step 2) to choose a new target;
    otherwise the Target persists across turns by default.
@@ -172,28 +175,42 @@ where a Target can be set.
 
 Three slots (labeled Dart 1 / 2 / 3, one per dart of the turn — the
 underlying Throw record IDs still use the `a`/`b`/`c` suffix from the Data
-Model below) sit to the right of the two board panels, for the current
-turn only:
+Model below) sit to the right of the two board panels:
 
 - Empty before that dart is thrown ("Not thrown").
 - Populated live as each throw is logged, showing its score label/value
   and distance from Target (the same data described under Scoring &
   Accuracy).
-- Once all 3 slots are filled (and only then — not while still logging
-  the 1st/2nd dart of the turn), the slots become tappable. Tapping a
-  slot arms it for editing; the next tap on **either board panel**
-  overwrites that dart's position (recomputing its score and distance)
-  instead of logging a new 4th throw, then editing turns off
-  automatically. Tapping an already-armed slot again disarms it without
-  changing anything.
-- Editing only applies to the in-progress turn, before End Turn is
-  tapped. Once End Turn is tapped the turn is final (see Out of Scope).
-- The **End Turn?** button lives in this panel, below the turn total,
-  rather than in the page footer — it only appears once all 3 slots are
-  filled, right next to the results it's finalizing.
+- Not tappable during normal live play — since the turn ends the instant
+  the 3rd dart lands, there's no window where the current turn's own
+  slots are click-to-edit. See "Editing a past turn" below for how
+  mistakes get fixed instead.
 - The **Confirm Target** button (Free Play only, see GAME_MODES.md) lives
-  in this same panel, in the same spot End Turn later occupies — it only
-  appears while setting a Target, before any of the panel's slots exist.
+  in this panel — it only appears while setting a Target, before any of
+  the panel's slots exist.
+
+### Editing a past turn
+
+Below the Throw Slots, the Cricket scoreboard / Free Play "Recent Turns"
+panel (see GAME_MODES.md) lists already-played turns. Tapping a played
+row there — not the live Throw Slots above it — is how a mistake gets
+fixed:
+
+1. Tapping a played row enters editing for that turn: the Throw Slots
+   panel swaps from showing the live current turn to showing that past
+   turn's 3 darts instead (with a header naming which turn), the board
+   panels show that turn's Target and darts, and the zoom panel switches
+   to that turn's Target sector.
+2. Tapping one of the 3 slots arms it; the next tap on **either board
+   panel** overwrites that dart's position (recomputing its score,
+   distance, and — for Cricket — its marks), then disarms automatically.
+   Repeat for any other dart in that turn that needs fixing.
+3. Tapping **Done** (or tapping the same row again) exits editing,
+   restoring the live current-turn view and zoom.
+
+While editing is active, Confirm Target / Move Target are hidden and
+board taps are captured by the armed slot (if any) rather than logging
+new darts for the live turn — finish or cancel the edit first.
 
 ## Scoring & Accuracy
 
@@ -251,9 +268,10 @@ Throw
 - Standard dart games beyond what's listed in GAME_MODES.md (e.g. 501) —
   new modes are added there as they're built
 - User accounts / multi-user support
-- Editing or deleting throws/turns/games once the turn has ended (End
-  Turn tapped) or the game has ended — only the 3 in-progress throws of
-  the *current, not-yet-ended* turn can be adjusted (see Throw Slots)
+- Editing or deleting turns/games once the *game* has ended — only turns
+  within the currently in-progress game can be edited (see "Editing a
+  past turn"), and only by adjusting individual dart positions, not by
+  adding/removing darts or turns
 - Portrait orientation support
 
 ## Confirmed Decisions
@@ -263,11 +281,14 @@ Throw
    **full board** change which sector the zoom panel displays; zoom-panel
    taps only refine the point. Once throwing starts, the zoom panel locks
    to the Target's sector and never changes for the rest of the turn (or
-   subsequent turns), even while adjusting an already-logged throw —
-   full-board taps just log/adjust a Throw Result without moving the
-   zoom window.
+   subsequent turns) — full-board taps just log a Throw Result without
+   moving the zoom window. It only changes again if the user enters
+   editing for a past turn (see below), switching to that turn's sector
+   for the duration.
 3. **Bounds**: a tap outside the board is a valid `Miss` throw (value 0),
    not ignored.
-4. **Throw Slots**: 3 slots on the right show the current turn's throws
-   as they're logged. Once all 3 are filled and before End Turn, tapping
-   a slot arms it so the next board tap overwrites that throw.
+4. **Auto-end turn**: a turn ends the instant its 3rd dart is logged —
+   no End Turn button. To fix a mistake, tap that turn's row in the
+   Cricket scoreboard / Free Play Recent Turns panel, which arms the
+   same slot-click-then-board-tap editing flow that used to live in the
+   Throw Slots panel, now scoped to whichever past turn was tapped.

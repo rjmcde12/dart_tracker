@@ -16,8 +16,11 @@ The original/default mode — open-ended practice with no fixed sequence.
 
 - User manually sets every Target by tapping the board (Set Target →
   Confirm Target, see CLAUDE.md Core Workflow). The **Confirm Target**
-  button lives in the Throw Slots panel, in the same spot **End Turn**
-  later occupies.
+  button lives in the Throw Slots panel.
+- A turn auto-ends the instant its 3rd dart is logged, starting a new
+  turn on the same Target — no End Turn button (see CLAUDE.md Core
+  Workflow). Fixing a mistake means tapping that turn's row in the
+  Recent Turns panel below, not the (now-empty) Throw Slots.
 - Target persists across turns until **Move Target** is tapped.
 - No automatic end condition — the session runs until **End Game** is
   tapped manually.
@@ -43,9 +46,14 @@ Below the Throw Slots, Free Play shows the **last 5 completed turns**
   Slots panel.
 - **Turn total** — sum of the 3 throws' point values.
 
+Tapping a row enters the edit-shot workflow for that turn (see CLAUDE.md
+"Editing a past turn") — the Throw Slots panel swaps to show that turn's
+3 darts for adjustment, and the row is highlighted while it's open.
+
 This is `FreePlayHistory` (`src/components/FreePlayHistory.tsx`), backed
 by an in-memory list capped at 5 entries — it isn't a DB query, just the
-last few turns kept in React state for the current session.
+last few turns kept in React state for the current session. Only these 5
+most-recent turns are reachable for editing this way.
 
 ## Cricket Practice
 
@@ -78,20 +86,25 @@ Exactly one turn (3 darts) per target, in this fixed order:
 - The **first** Target (20) is placed and the game enters the throwing
   phase immediately — there is no Set Target/Confirm Target step at all
   in this mode.
-- Tapping **End Turn** records that turn's tally (see below) and
-  auto-advances: the next number in the sequence becomes the new Target,
-  placed automatically per the Single/Triple variant, and a new turn
-  starts right away (still no manual confirm step).
+- A turn auto-ends the instant its 3rd dart is logged (no End Turn
+  button — see CLAUDE.md Core Workflow), recording that turn's tally
+  (see below) and auto-advancing: the next number in the sequence
+  becomes the new Target, placed automatically per the Single/Triple
+  variant, and a new turn starts right away.
 - **Bull** is always the final target regardless of the Single/Triple
   choice — there's no "single vs. triple" distinction for the bull.
   Its Target is placed dead center `(0, 0)`.
 - **Move Target** is not available in this mode (there's nothing to move
   — the sequence controls Target placement).
-- Ending the **Bull** turn (tapping End Turn) automatically ends the
-  game (`Game.endedAt` set) and opens the results modal — no manual End
-  Game tap is needed to finish a completed sequence. (Manual End Game
-  still works at any point to bail out early, in which case no results
-  modal is shown.)
+- The 3rd dart of the **Bull** turn automatically ends the game
+  (`Game.endedAt` set) and opens the results modal — no manual End Game
+  tap is needed to finish a completed sequence. (Manual End Game still
+  works at any point to bail out early, in which case no results modal
+  is shown.)
+- If a dart needs fixing, tap that number's row in the live Game Results
+  scoreboard (see below) — see CLAUDE.md "Editing a past turn". Only
+  turns within the *current, in-progress* game are editable this way;
+  once the results modal appears the game is over and its data is fixed.
 
 ### Tallies (not points)
 
@@ -125,9 +138,12 @@ as a row of the target label + 3 per-dart result circles + a running
 total. It's the same row layout as the end-of-game results modal (see
 below), minus the Best column. A target whose turn hasn't happened yet
 shows 3 empty, dimmed placeholder circles and a `–` instead of a total —
-it updates to real marks only once that turn's End Turn is tapped (the
-turn currently being thrown stays in its "not yet played" state here
-even though its darts are already visible above in the Throw Slots).
+it updates to real marks only once that turn's 3rd dart auto-ends it
+(the turn currently being thrown stays in its "not yet played" state
+here even though its darts are already visible above in the Throw
+Slots). Tapping an already-played row enters the edit-shot workflow for
+that turn (CLAUDE.md "Editing a past turn"), highlighting the row while
+it's open.
 
 Each per-dart circle (`CricketThrowMark` component) shows that single
 throw's result against the target:
